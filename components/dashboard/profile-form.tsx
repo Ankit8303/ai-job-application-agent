@@ -15,8 +15,9 @@ import {
   CheckCircle2,
   Loader2,
   AlertCircle,
-  FileText,
-  Sparkles,
+  Medal,
+  Calendar,
+  Building,
 } from "lucide-react";
 
 export interface ExperienceItem {
@@ -110,14 +111,14 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     setSaveSuccess(false);
   };
 
-  // Experience handlers
+  // Experience handlers (support multiple)
   const handleAddExperience = () => {
     const newItem: ExperienceItem = {
-      company_name: "New Company",
-      job_title: "Position Title",
+      company_name: "Company Name",
+      job_title: "Role / Position Title",
       duration: "2023 - Present",
-      location: "Remote",
-      responsibilities: ["Contributed to core development and project delivery."],
+      location: "Remote / On-site",
+      responsibilities: ["Key achievement or responsibility bullet point."],
     };
     setProfile((prev) => ({
       ...prev,
@@ -145,13 +146,14 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     setSaveSuccess(false);
   };
 
-  // Education handlers
+  // Education handlers (support multiple)
   const handleAddEducation = () => {
     const newItem: EducationItem = {
-      institution: "University / Institution",
-      degree: "Bachelor of Science",
+      institution: "College / University Name",
+      degree: "Bachelor of Science / B.Tech",
       field_of_study: "Computer Science",
       graduation_year: "2024",
+      gpa: "",
     };
     setProfile((prev) => ({
       ...prev,
@@ -179,12 +181,12 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     setSaveSuccess(false);
   };
 
-  // Projects handlers
+  // Projects handlers (support multiple)
   const handleAddProject = () => {
     const newItem: ProjectItem = {
-      title: "New Project",
-      description: "Description of the project architecture and outcomes.",
-      technologies: ["React", "TypeScript"],
+      title: "Project Name",
+      description: "Detailed description of the application architecture and features.",
+      technologies: ["React", "TypeScript", "Node.js"],
       link: "https://",
     };
     setProfile((prev) => ({
@@ -209,6 +211,39 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     setProfile((prev) => ({
       ...prev,
       projects: prev.projects.filter((_, i) => i !== index),
+    }));
+    setSaveSuccess(false);
+  };
+
+  // Certifications handlers (support multiple)
+  const handleAddCertification = () => {
+    const newItem: CertificationItem = {
+      name: "Certification / License Name",
+      issuer: "Issuing Organization (e.g. AWS, Google)",
+      year: "2024",
+    };
+    setProfile((prev) => ({
+      ...prev,
+      certifications: [...prev.certifications, newItem],
+    }));
+    setSaveSuccess(false);
+  };
+
+  const handleUpdateCertification = (
+    index: number,
+    field: keyof CertificationItem,
+    value: string
+  ) => {
+    const updated = [...profile.certifications];
+    updated[index] = { ...updated[index], [field]: value };
+    setProfile((prev) => ({ ...prev, certifications: updated }));
+    setSaveSuccess(false);
+  };
+
+  const handleRemoveCertification = (index: number) => {
+    setProfile((prev) => ({
+      ...prev,
+      certifications: prev.certifications.filter((_, i) => i !== index),
     }));
     setSaveSuccess(false);
   };
@@ -289,17 +324,17 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               Candidate Profile
             </span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-medium">
-              Parsed & Syncing
+              Synchronized & Active
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Data extracted from your resume via Gemini AI. Review, customize, and save.
+            Complete details extracted from your resume. All entries are fully editable and saved to Supabase.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {saveSuccess && (
-            <div className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl">
+            <div className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl animate-in fade-in">
               <CheckCircle2 className="w-4 h-4" />
               <span>Saved to Supabase!</span>
             </div>
@@ -332,7 +367,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
         </div>
       </div>
 
-      {/* 1. Basic Information */}
+      {/* 1. Personal & Contact Details */}
       <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-5">
         <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
           <User className="w-4 h-4 text-indigo-400" />
@@ -413,7 +448,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               rows={4}
               value={profile.summary || ""}
               onChange={(e) => handleFieldChange("summary", e.target.value)}
-              placeholder="Executive summary of your background, achievements, and technical expertise..."
+              placeholder="Comprehensive summary of your background, experience, key strengths, and objectives..."
               className="w-full p-3.5 rounded-xl bg-slate-900 border border-slate-700/80 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 leading-relaxed"
             />
           </div>
@@ -429,13 +464,13 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
           </h3>
         </div>
 
-        {/* Add skill input */}
+        {/* Add skill form */}
         <form onSubmit={handleAddSkill} className="flex gap-2">
           <input
             type="text"
             value={newSkill}
             onChange={(e) => setNewSkill(e.target.value)}
-            placeholder="Add new skill (e.g. GraphQL, Docker, Python)..."
+            placeholder="Type skill name (e.g. Python, Docker, Next.js, Kubernetes) and press Enter..."
             className="flex-1 h-10 px-3.5 rounded-xl bg-slate-900 border border-slate-700/80 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button
@@ -468,16 +503,21 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
         </div>
       </div>
 
-      {/* 3. Work Experience */}
+      {/* 3. Work Experience (Multiple Entries Supported) */}
       <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-5">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <Briefcase className="w-4 h-4 text-amber-400" />
-            Work Experience ({profile.experience.length})
-          </h3>
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Briefcase className="w-4 h-4 text-amber-400" />
+              Work Experience ({profile.experience.length})
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              All past and present employment roles, internships, and freelance positions.
+            </p>
+          </div>
           <button
             onClick={handleAddExperience}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+            className="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Position</span>
@@ -488,10 +528,10 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
           {profile.experience.map((exp, idx) => (
             <div
               key={idx}
-              className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3 relative group"
+              className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3.5 relative group"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">
+                <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
                   Position #{idx + 1}
                 </span>
                 <button
@@ -506,7 +546,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Company Name
+                    Company Name *
                   </label>
                   <input
                     type="text"
@@ -519,7 +559,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Job Title
+                    Job Title / Role *
                   </label>
                   <input
                     type="text"
@@ -532,7 +572,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Duration
+                    Duration / Dates (e.g. Jan 2022 - Present)
                   </label>
                   <input
                     type="text"
@@ -545,7 +585,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Location
+                    Location (e.g. New York, NY / Remote)
                   </label>
                   <input
                     type="text"
@@ -560,7 +600,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
 
               <div>
                 <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                  Key Responsibilities / Achievements (one per line)
+                  Responsibilities & Achievements (one bullet per line)
                 </label>
                 <textarea
                   rows={3}
@@ -576,7 +616,8 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                       e.target.value.split("\n").filter(Boolean)
                     )
                   }
-                  className="w-full p-3 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Led the re-architecture of microservices...&#10;Boosted query response times by 35%..."
+                  className="w-full p-3 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 leading-relaxed"
                 />
               </div>
             </div>
@@ -584,16 +625,21 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
         </div>
       </div>
 
-      {/* 4. Education Information */}
+      {/* 4. Education (Multiple Degrees & Institutions Supported) */}
       <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-5">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <GraduationCap className="w-4 h-4 text-emerald-400" />
-            Education ({profile.education.length})
-          </h3>
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <GraduationCap className="w-4 h-4 text-emerald-400" />
+              Education & Degrees ({profile.education.length})
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              All universities, colleges, degrees, diplomas, and high schools.
+            </p>
+          </div>
           <button
             onClick={handleAddEducation}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+            className="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Education</span>
@@ -607,8 +653,8 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2.5 relative"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-emerald-400">
-                  Education #{idx + 1}
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  Degree / School #{idx + 1}
                 </span>
                 <button
                   onClick={() => handleRemoveEducation(idx)}
@@ -621,7 +667,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
 
               <div>
                 <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
-                  Institution
+                  Institution / University
                 </label>
                 <input
                   type="text"
@@ -636,7 +682,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
-                    Degree
+                    Degree Name
                   </label>
                   <input
                     type="text"
@@ -649,7 +695,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
-                    Graduation Year
+                    Graduation Year / Dates
                   </label>
                   <input
                     type="text"
@@ -662,33 +708,51 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                 </div>
               </div>
 
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
-                  Major / Field of Study
-                </label>
-                <input
-                  type="text"
-                  value={edu.field_of_study}
-                  onChange={(e) =>
-                    handleUpdateEducation(idx, "field_of_study", e.target.value)
-                  }
-                  className="w-full h-8 px-2.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
+                    Field of Study / Major
+                  </label>
+                  <input
+                    type="text"
+                    value={edu.field_of_study}
+                    onChange={(e) =>
+                      handleUpdateEducation(idx, "field_of_study", e.target.value)
+                    }
+                    className="w-full h-8 px-2.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-slate-400 block mb-0.5">
+                    GPA / Score (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={edu.gpa || ""}
+                    onChange={(e) =>
+                      handleUpdateEducation(idx, "gpa", e.target.value)
+                    }
+                    placeholder="e.g. 3.8 / 4.0"
+                    className="w-full h-8 px-2.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white"
+                  />
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 5. Projects & Links */}
+      {/* 5. Projects & Certifications Sections */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Projects */}
+        {/* Projects (Multiple) */}
         <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Award className="w-4 h-4 text-pink-400" />
-              Projects ({profile.projects.length})
-            </h3>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Award className="w-4 h-4 text-pink-400" />
+                Projects ({profile.projects.length})
+              </h3>
+            </div>
             <button
               onClick={handleAddProject}
               className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
@@ -727,32 +791,49 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                   onChange={(e) =>
                     handleUpdateProject(idx, "description", e.target.value)
                   }
-                  placeholder="Project summary..."
-                  className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300"
+                  placeholder="Project overview & impact..."
+                  className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300 leading-relaxed"
                 />
-                <input
-                  type="text"
-                  value={proj.link || ""}
-                  onChange={(e) =>
-                    handleUpdateProject(idx, "link", e.target.value)
-                  }
-                  placeholder="URL / GitHub Link"
-                  className="w-full h-7 px-2 rounded bg-slate-950 border border-slate-700 text-xs text-indigo-400"
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={Array.isArray(proj.technologies) ? proj.technologies.join(", ") : proj.technologies || ""}
+                    onChange={(e) =>
+                      handleUpdateProject(
+                        idx,
+                        "technologies",
+                        e.target.value.split(",").map((t) => t.trim()).filter(Boolean)
+                      )
+                    }
+                    placeholder="Technologies (comma-separated)"
+                    className="w-full h-7 px-2 rounded bg-slate-950 border border-slate-700 text-[11px] text-slate-300"
+                  />
+                  <input
+                    type="text"
+                    value={proj.link || ""}
+                    onChange={(e) =>
+                      handleUpdateProject(idx, "link", e.target.value)
+                    }
+                    placeholder="Project URL / GitHub"
+                    className="w-full h-7 px-2 rounded bg-slate-950 border border-slate-700 text-[11px] text-indigo-400"
+                  />
+                </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Links & Socials */}
+        {/* Certifications (Multiple) */}
         <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <LinkIcon className="w-4 h-4 text-cyan-400" />
-              Links & Portfolio ({profile.links.length})
-            </h3>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Medal className="w-4 h-4 text-amber-400" />
+                Certifications ({profile.certifications.length})
+              </h3>
+            </div>
             <button
-              onClick={handleAddLink}
+              onClick={handleAddCertification}
               className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-3 h-3" />
@@ -761,38 +842,103 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
           </div>
 
           <div className="space-y-3">
-            {profile.links.map((link, idx) => (
+            {profile.certifications.map((cert, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800"
+                className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2 relative"
               >
-                <input
-                  type="text"
-                  value={link.label}
-                  onChange={(e) =>
-                    handleUpdateLink(idx, "label", e.target.value)
-                  }
-                  placeholder="Label (e.g. GitHub)"
-                  className="w-1/3 h-8 px-2.5 rounded bg-slate-950 border border-slate-700 text-xs text-white"
-                />
-                <input
-                  type="url"
-                  value={link.url}
-                  onChange={(e) =>
-                    handleUpdateLink(idx, "url", e.target.value)
-                  }
-                  placeholder="https://..."
-                  className="flex-1 h-8 px-2.5 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300"
-                />
-                <button
-                  onClick={() => handleRemoveLink(idx)}
-                  className="text-slate-500 hover:text-rose-400 p-1"
-                >
-                  ✕
-                </button>
+                <div className="flex items-center justify-between">
+                  <input
+                    type="text"
+                    value={cert.name}
+                    onChange={(e) =>
+                      handleUpdateCertification(idx, "name", e.target.value)
+                    }
+                    placeholder="Certification Name (e.g. AWS Solutions Architect)"
+                    className="font-semibold text-xs text-white bg-transparent border-b border-slate-700 focus:outline-none focus:border-indigo-500 pb-0.5 w-3/4"
+                  />
+                  <button
+                    onClick={() => handleRemoveCertification(idx)}
+                    className="text-slate-500 hover:text-rose-400 text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={cert.issuer}
+                    onChange={(e) =>
+                      handleUpdateCertification(idx, "issuer", e.target.value)
+                    }
+                    placeholder="Issuing Authority"
+                    className="w-full h-7 px-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300"
+                  />
+                  <input
+                    type="text"
+                    value={cert.year || ""}
+                    onChange={(e) =>
+                      handleUpdateCertification(idx, "year", e.target.value)
+                    }
+                    placeholder="Year Issued"
+                    className="w-full h-7 px-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300"
+                  />
+                </div>
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* 6. Links & Portfolio */}
+      <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <LinkIcon className="w-4 h-4 text-cyan-400" />
+            Socials & External Links ({profile.links.length})
+          </h3>
+          <button
+            onClick={handleAddLink}
+            className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3 h-3" />
+            <span>Add Link</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {profile.links.map((link, idx) => (
+            <div
+              key={idx}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800"
+            >
+              <input
+                type="text"
+                value={link.label}
+                onChange={(e) =>
+                  handleUpdateLink(idx, "label", e.target.value)
+                }
+                placeholder="Platform (e.g. GitHub, LinkedIn)"
+                className="w-1/3 h-8 px-2.5 rounded bg-slate-950 border border-slate-700 text-xs text-white font-medium"
+              />
+              <input
+                type="url"
+                value={link.url}
+                onChange={(e) =>
+                  handleUpdateLink(idx, "url", e.target.value)
+                }
+                placeholder="https://..."
+                className="flex-1 h-8 px-2.5 rounded bg-slate-950 border border-slate-700 text-xs text-slate-300"
+              />
+              <button
+                onClick={() => handleRemoveLink(idx)}
+                className="text-slate-500 hover:text-rose-400 p-1"
+                title="Remove link"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       </div>
     </div>
