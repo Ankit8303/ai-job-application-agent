@@ -107,8 +107,7 @@ export function OnboardingDialog({ isOpen, onSuccess }: OnboardingDialogProps) {
 
       // Success
       onSuccess();
-      router.push("/dashboard/profile?onboarded=true");
-      router.refresh();
+      window.location.href = "/dashboard/profile?onboarded=true";
     } catch (err: unknown) {
       console.error(err);
       const msg = err instanceof Error ? err.message : "Failed to upload and parse resume.";

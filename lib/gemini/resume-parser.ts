@@ -36,6 +36,8 @@ export interface LinkItem {
 }
 
 export interface ParsedResumeData {
+  is_resume?: boolean;
+  rejection_reason?: string;
   full_name: string;
   email: string;
   phone: string;
@@ -52,30 +54,37 @@ export interface ParsedResumeData {
 
 const PARSE_PROMPT = `
 You are an elite, highly precise recruitment AI analyst.
-Your task is to analyze the candidate's resume and extract accurate, real data into strict JSON format.
+Your task is to analyze the candidate's document, determine if it is a genuine resume/CV, and extract accurate, real data into strict JSON format.
 
 CRITICAL EXTRACTION RULES (STRICT ACCURACY):
-1. FACTUAL EXTRACTION ONLY:
+1. RESUME CLASSIFICATION & VALIDATION:
+   - Determine whether the attached document is a genuine resume, CV, or curriculum vitae.
+   - If the document is NOT a resume (e.g., an invoice, bill, payment receipt, tax document, bank statement, medical report, legal contract, ticket, academic paper, book chapter, or arbitrary non-resume text), set "is_resume": false, and set "rejection_reason" with a short, user-friendly explanation (e.g. "The uploaded document appears to be an invoice or receipt, not a resume.").
+   - If the document IS a legitimate resume or CV, set "is_resume": true and set "rejection_reason": "".
+
+2. FACTUAL EXTRACTION ONLY:
    - Extract ONLY the actual candidate details explicitly present in the resume.
    - NEVER make up, invent, fabricate, or hallucinate any employer, job title, degree, school, project, skill, certification, or personal detail.
    - If a section or field is NOT present in the resume, return an empty string "" or empty array [].
    - NEVER use placeholder text such as "Candidate", "Full candidate name", "Company Name", "Tech Solutions Inc.", "University of Technology", "Project Title", etc.
 
-2. WORK EXPERIENCE:
+3. WORK EXPERIENCE:
    - Extract EVERY work experience entry from the resume into the "experience" array.
    - Include company_name, job_title, duration, location, and all bullet points into "responsibilities".
 
-3. EDUCATION:
+4. EDUCATION:
    - Extract EVERY education entry (degrees, universities, colleges, dates, honors/GPA).
 
-4. SKILLS:
+5. SKILLS:
    - Extract all technical skills, programming languages, frameworks, cloud tools, databases, and libraries mentioned in the resume into the "skills" array.
 
-5. PROJECTS & CERTIFICATIONS:
+6. PROJECTS & CERTIFICATIONS:
    - Extract real projects and certifications explicitly documented in the resume.
 
 JSON Output Schema:
 {
+  "is_resume": true,
+  "rejection_reason": "",
   "full_name": "Exact Candidate Name",
   "email": "Exact Email",
   "phone": "Exact Phone",
@@ -152,13 +161,17 @@ export async function extractTextFromResume(
       const uint8 = new Uint8Array(content);
       const parser = new PDFParse(uint8);
       const res = await parser.getText();
+      let fullText = "";
       if (res && Array.isArray(res.pages) && res.pages.length > 0) {
-        const fullText = res.pages
+        fullText = res.pages
           .map((p) => (p && typeof p.text === "string" ? p.text : ""))
           .join("\n\n");
-        if (fullText.trim().length > 30) {
-          return fullText.trim();
-        }
+      }
+      if (!fullText && res && typeof res.text === "string") {
+        fullText = res.text;
+      }
+      if (fullText.trim().length > 30) {
+        return fullText.trim();
       }
     } catch (pdfErr) {
       console.warn("PDFParse extraction error:", pdfErr);
@@ -272,6 +285,8 @@ export function sanitizeParsedResumeData(data: Partial<ParsedResumeData>): Parse
     : [];
 
   return {
+    is_resume: data.is_resume !== false,
+    rejection_reason: data.rejection_reason || "",
     full_name: cleanString(data.full_name),
     email: cleanString(data.email),
     phone: cleanString(data.phone),
@@ -285,6 +300,212 @@ export function sanitizeParsedResumeData(data: Partial<ParsedResumeData>): Parse
     certifications,
     links,
   };
+}
+
+/**
+ * Rigorously checks whether extracted text and parsed data represent a genuine resume/CV.
+ * Detects and rejects invoices, bills, receipts, bank statements, medical reports,
+ * legal agreements, tickets, or arbitrary documents that lack standard resume sections.
+ */
+export function validateResumeDocument(
+  rawText: string,
+  data: Partial<ParsedResumeData>
+): { isResume: boolean; rejectionReason?: string } {
+  // If Gemini or parser already explicitly flagged it as non-resume
+  if (data.is_resume === false) {
+    return {
+      isResume: false,
+      rejectionReason:
+        data.rejection_reason ||
+        "The uploaded document does not appear to be a resume or CV.",
+    };
+  }
+
+  const cleanText = (rawText || "").toLowerCase().trim();
+
+  // 1. Text length check
+  if (cleanText.length < 50) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document is too short or unreadable to be a valid resume.",
+    };
+  }
+
+  // 2. Disqualifiers: Invoices / Bills / Receipts / Financial Orders
+  const invoiceKeywords = [
+    "tax invoice",
+    "invoice no",
+    "invoice #",
+    "invoice date",
+    "bill to",
+    "billed to",
+    "ship to",
+    "shipping address",
+    "subtotal",
+    "total amount",
+    "amount due",
+    "balance due",
+    "payment receipt",
+    "gstin",
+    "vat no",
+    "due date",
+    "order confirmation",
+    "payment mode",
+    "total amount payable",
+    "hsn/sac",
+    "purchase order",
+  ];
+
+  let invoiceMatchCount = 0;
+  for (const kw of invoiceKeywords) {
+    if (cleanText.includes(kw)) {
+      invoiceMatchCount++;
+    }
+  }
+
+  if (invoiceMatchCount >= 2) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document appears to be an invoice, bill, or receipt, not a resume.",
+    };
+  }
+
+  // 3. Bank Statements / Financial transactions
+  const bankKeywords = [
+    "account statement",
+    "statement of account",
+    "available balance",
+    "closing balance",
+    "ledger balance",
+    "cheque no",
+    "withdrawal amount",
+    "deposit amount",
+    "debit amount",
+    "credit amount",
+    "transaction date",
+    "branch ifsc",
+  ];
+
+  let bankMatchCount = 0;
+  for (const kw of bankKeywords) {
+    if (cleanText.includes(kw)) {
+      bankMatchCount++;
+    }
+  }
+
+  if (bankMatchCount >= 2) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document appears to be a bank statement or financial record, not a resume.",
+    };
+  }
+
+  // 4. Medical / Clinical Reports
+  const medicalKeywords = [
+    "clinical pathology",
+    "blood test",
+    "lab report",
+    "haemoglobin",
+    "diagnostic report",
+    "sample collected",
+    "referred by dr",
+    "patient name",
+    "test name",
+  ];
+
+  let medicalMatchCount = 0;
+  for (const kw of medicalKeywords) {
+    if (cleanText.includes(kw)) {
+      medicalMatchCount++;
+    }
+  }
+
+  if (medicalMatchCount >= 2) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document appears to be a medical report or lab result, not a resume.",
+    };
+  }
+
+  // 5. Travel Tickets / Boarding passes
+  const ticketKeywords = [
+    "boarding pass",
+    "flight ticket",
+    "railway ticket",
+    "e-ticket",
+    "pnr no",
+    "seat no",
+    "passenger name",
+  ];
+
+  let ticketMatchCount = 0;
+  for (const kw of ticketKeywords) {
+    if (cleanText.includes(kw)) {
+      ticketMatchCount++;
+    }
+  }
+
+  if (ticketMatchCount >= 2) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document appears to be a travel ticket or boarding pass, not a resume.",
+    };
+  }
+
+  // 6. Positive Resume Indicator Assessment
+  const hasExperienceHeader = /\b(?:experience|employment|work history|professional history|internship|responsibilities)\b/i.test(cleanText);
+  const hasEducationHeader = /\b(?:education|academic|qualifications|university|college|bachelor|master|b\.?tech|m\.?tech|b\.?e|b\.?sc|m\.?sc|phd|diploma)\b/i.test(cleanText);
+  const hasSkillsHeader = /\b(?:skills|technical skills|technologies|proficiencies|competencies|programming)\b/i.test(cleanText);
+  const hasProjectsHeader = /\b(?:projects|key projects|academic projects)\b/i.test(cleanText);
+  const hasSummaryHeader = /\b(?:summary|career objective|professional summary|about me)\b/i.test(cleanText);
+
+  const sectionMatches = [
+    hasExperienceHeader,
+    hasEducationHeader,
+    hasSkillsHeader,
+    hasProjectsHeader,
+    hasSummaryHeader,
+  ].filter(Boolean).length;
+
+  const skillsCount = Array.isArray(data.skills) ? data.skills.length : 0;
+  const expCount = Array.isArray(data.experience) ? data.experience.length : 0;
+  const eduCount = Array.isArray(data.education) ? data.education.length : 0;
+  const projCount = Array.isArray(data.projects) ? data.projects.length : 0;
+  const certCount = Array.isArray(data.certifications) ? data.certifications.length : 0;
+
+  const totalStructuredEntities = skillsCount + expCount + eduCount + projCount + certCount;
+
+  // If there are zero resume section headers AND zero structured career items, reject
+  if (sectionMatches === 0 && totalStructuredEntities === 0) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded file does not contain standard resume sections (such as Work Experience, Education, or Skills). Please upload a legitimate resume.",
+    };
+  }
+
+  // A resume MUST have at least some professional or academic content:
+  // e.g. at least 1 work experience, or 1 education, or 2+ skills, or 1 project
+  const hasSubstantialCareerContent =
+    expCount > 0 ||
+    eduCount > 0 ||
+    skillsCount >= 2 ||
+    (projCount > 0 && (hasExperienceHeader || hasEducationHeader || hasSkillsHeader));
+
+  if (!hasSubstantialCareerContent) {
+    return {
+      isResume: false,
+      rejectionReason:
+        "The uploaded document does not contain sufficient work experience, education, or skills details to qualify as a resume.",
+    };
+  }
+
+  return { isResume: true };
 }
 
 /**
@@ -303,6 +524,8 @@ export async function parseResumeWithGemini(
   const isBuffer = Buffer.isBuffer(content);
   // Extract real text from resume
   const extractedText = await extractTextFromResume(content, mimeType);
+
+  let parsed: ParsedResumeData | null = null;
 
   if (apiKey) {
     try {
@@ -339,49 +562,65 @@ export async function parseResumeWithGemini(
             .replace(/^```json\s*/i, "")
             .replace(/^```\s*/i, "")
             .replace(/\s*```$/i, "");
-          const parsed = JSON.parse(cleanJson);
-          return sanitizeParsedResumeData(parsed);
+          const rawParsed = JSON.parse(cleanJson);
+          parsed = sanitizeParsedResumeData(rawParsed);
         }
       } catch (genAiError) {
         console.warn("@google/genai failed, trying @google/generative-ai fallback:", genAiError);
       }
 
       // 2. Try with @google/generative-ai fallback
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({
-        model: selectedModel,
-        generationConfig: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const partsFallback: (string | Part)[] = [];
-      if (isBuffer && (!extractedText || extractedText.length < 100)) {
-        partsFallback.push({
-          inlineData: {
-            data: content.toString("base64"),
-            mimeType: mimeType || "application/pdf",
+      if (!parsed) {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+          model: selectedModel,
+          generationConfig: {
+            responseMimeType: "application/json",
           },
         });
+
+        const partsFallback: (string | Part)[] = [];
+        if (isBuffer && (!extractedText || extractedText.length < 100)) {
+          partsFallback.push({
+            inlineData: {
+              data: content.toString("base64"),
+              mimeType: mimeType || "application/pdf",
+            },
+          });
+        }
+        partsFallback.push(promptText);
+
+        const result = await model.generateContent(partsFallback);
+        const text = result.response.text().trim();
+        const cleanJson = text
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/\s*```$/i, "");
+
+        const rawParsed = JSON.parse(cleanJson);
+        parsed = sanitizeParsedResumeData(rawParsed);
       }
-      partsFallback.push(promptText);
-
-      const result = await model.generateContent(partsFallback);
-      const text = result.response.text().trim();
-      const cleanJson = text
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/\s*```$/i, "");
-
-      const parsed = JSON.parse(cleanJson);
-      return sanitizeParsedResumeData(parsed);
     } catch (error) {
       console.error("Gemini AI parsing failed, falling back to local exact parser:", error);
     }
   }
 
   // Exact structural parser fallback
-  return parseResumeTextAccurately(extractedText);
+  if (!parsed) {
+    parsed = parseResumeTextAccurately(extractedText);
+  }
+
+  // Run comprehensive validation to ensure document is truly a resume
+  const validation = validateResumeDocument(extractedText, parsed);
+  if (!validation.isResume) {
+    parsed.is_resume = false;
+    parsed.rejection_reason = validation.rejectionReason;
+  } else {
+    parsed.is_resume = true;
+    parsed.rejection_reason = "";
+  }
+
+  return parsed;
 }
 
 function cleanGlyphs(str: string): string {
@@ -395,6 +634,8 @@ function cleanGlyphs(str: string): string {
 export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   if (!rawText || !rawText.trim()) {
     return {
+      is_resume: false,
+      rejection_reason: "The uploaded document contains no readable text.",
       full_name: "",
       email: "",
       phone: "",

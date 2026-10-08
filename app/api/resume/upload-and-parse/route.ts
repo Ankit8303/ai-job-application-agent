@@ -34,7 +34,23 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(arrayBuffer);
     const mimeType = file.type || "application/pdf";
 
-    // 1. Upload to Supabase Storage
+    // 1. Parse and validate document content first
+    const parsedData = await parseResumeWithGemini(buffer, mimeType);
+
+    // Strictly reject non-resume documents!
+    if (parsedData.is_resume === false) {
+      return NextResponse.json(
+        {
+          error:
+            parsedData.rejection_reason ||
+            "The uploaded file is not a valid resume or CV. Please upload a legitimate resume.",
+          isNotResume: true,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 2. Upload to Supabase Storage (only for valid resumes)
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const storagePath = `${user.id}/${Date.now()}-${sanitizedFileName}`;
 
@@ -57,9 +73,6 @@ export async function POST(request: Request) {
       data: { publicUrl },
     } = supabase.storage.from("resumes").getPublicUrl(storagePath);
 
-    // 2. Parse resume directly with Gemini AI model (supports PDF multimodal inlineData natively)
-    const parsedData = await parseResumeWithGemini(buffer, mimeType);
-
     // 3. Save resume record in public.resumes
     const { data: resumeRecord, error: resumeDbError } = await supabase
       .from("resumes")
@@ -79,12 +92,19 @@ export async function POST(request: Request) {
     }
 
     // 4. Update user profile in public.profiles with extracted data
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
     const safeFullName =
       parsedData.full_name &&
       !parsedData.full_name.startsWith("%PDF") &&
       parsedData.full_name !== "Candidate"
         ? parsedData.full_name
-        : user.user_metadata?.full_name ||
+        : existingProfile?.full_name ||
+          user.user_metadata?.full_name ||
           user.user_metadata?.name ||
           user.email?.split("@")[0] ||
           "Candidate";
@@ -93,16 +113,49 @@ export async function POST(request: Request) {
       id: user.id,
       email: user.email,
       full_name: safeFullName,
-      phone: parsedData.phone || null,
-      location: parsedData.location || null,
-      headline: parsedData.headline || "Software Engineer",
-      summary: parsedData.summary || null,
-      skills: Array.isArray(parsedData.skills) ? parsedData.skills : [],
-      experience: Array.isArray(parsedData.experience) ? parsedData.experience : [],
-      education: Array.isArray(parsedData.education) ? parsedData.education : [],
-      projects: Array.isArray(parsedData.projects) ? parsedData.projects : [],
-      certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : [],
-      links: Array.isArray(parsedData.links) ? parsedData.links : [],
+      phone: parsedData.phone || existingProfile?.phone || null,
+      location: parsedData.location || existingProfile?.location || null,
+      headline:
+        parsedData.headline ||
+        existingProfile?.headline ||
+        "Software Engineer",
+      summary: parsedData.summary || existingProfile?.summary || null,
+      skills:
+        Array.isArray(parsedData.skills) && parsedData.skills.length > 0
+          ? parsedData.skills
+          : Array.isArray(existingProfile?.skills)
+          ? existingProfile.skills
+          : [],
+      experience:
+        Array.isArray(parsedData.experience) && parsedData.experience.length > 0
+          ? parsedData.experience
+          : Array.isArray(existingProfile?.experience)
+          ? existingProfile.experience
+          : [],
+      education:
+        Array.isArray(parsedData.education) && parsedData.education.length > 0
+          ? parsedData.education
+          : Array.isArray(existingProfile?.education)
+          ? existingProfile.education
+          : [],
+      projects:
+        Array.isArray(parsedData.projects) && parsedData.projects.length > 0
+          ? parsedData.projects
+          : Array.isArray(existingProfile?.projects)
+          ? existingProfile.projects
+          : [],
+      certifications:
+        Array.isArray(parsedData.certifications) && parsedData.certifications.length > 0
+          ? parsedData.certifications
+          : Array.isArray(existingProfile?.certifications)
+          ? existingProfile.certifications
+          : [],
+      links:
+        Array.isArray(parsedData.links) && parsedData.links.length > 0
+          ? parsedData.links
+          : Array.isArray(existingProfile?.links)
+          ? existingProfile.links
+          : [],
       onboarded: true,
       updated_at: new Date().toISOString(),
     };
