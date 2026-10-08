@@ -49,6 +49,7 @@ export function ResumeList({ initialResumes }: ResumeListProps) {
   const [uploadStatus, setUploadStatus] = useState("");
   const [selectedResumePreview, setSelectedResumePreview] = useState<ResumeItem | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [profileUpdatedMsg, setProfileUpdatedMsg] = useState<string | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
@@ -56,7 +57,8 @@ export function ResumeList({ initialResumes }: ResumeListProps) {
 
     setUploading(true);
     setErrorMsg(null);
-    setUploadStatus("Uploading to Supabase Storage & parsing with Gemini AI...");
+    setProfileUpdatedMsg(null);
+    setUploadStatus("Uploading to Supabase Storage & extracting with AI...");
 
     try {
       const formData = new FormData();
@@ -74,6 +76,9 @@ export function ResumeList({ initialResumes }: ResumeListProps) {
 
       if (data.resume) {
         setResumes([data.resume, ...resumes]);
+        setProfileUpdatedMsg(
+          `Resume "${file.name}" was parsed successfully and your Candidate Profile has been populated with all exact details!`
+        );
       }
 
       router.refresh();
@@ -184,6 +189,21 @@ export function ResumeList({ initialResumes }: ResumeListProps) {
         <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-center gap-2.5 animate-pulse">
           <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
           <span>{uploadStatus}</span>
+        </div>
+      )}
+
+      {profileUpdatedMsg && (
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{profileUpdatedMsg}</span>
+          </div>
+          <button
+            onClick={() => router.push("/dashboard/profile")}
+            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs whitespace-nowrap cursor-pointer transition-colors shadow-md shadow-emerald-600/20"
+          >
+            View Candidate Profile →
+          </button>
         </div>
       )}
 

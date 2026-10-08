@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   User,
@@ -18,6 +18,8 @@ import {
   Medal,
   Globe,
   Sparkles,
+  UploadCloud,
+  FileText,
 } from "lucide-react";
 import { ProfileCompletenessCard } from "./profile-completeness-card";
 
@@ -87,6 +89,7 @@ type TabType =
 
 export function ProfileForm({ initialProfile }: ProfileFormProps) {
   const supabase = createClient();
+  const resumeFileInputRef = useRef<HTMLInputElement>(null);
 
   const [profile, setProfile] = useState<ProfileData>(initialProfile);
   const [activeTab, setActiveTab] = useState<TabType>("personal");
@@ -94,6 +97,66 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Resume auto-fill state
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
+  const [autoFillStatus, setAutoFillStatus] = useState("");
+  const [autoFillResult, setAutoFillResult] = useState<{
+    fileName: string;
+    skillsCount: number;
+    expCount: number;
+    eduCount: number;
+  } | null>(null);
+
+  // Keep state synced with server initialProfile updates
+  useEffect(() => {
+    setProfile(initialProfile);
+  }, [initialProfile]);
+
+  const handleResumeAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+
+    setIsAutoFilling(true);
+    setAutoFillStatus("Uploading & extracting resume information with AI...");
+    setSaveError(null);
+    setSaveSuccess(false);
+    setAutoFillResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/resume/upload-and-parse", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to parse resume.");
+      }
+
+      if (data.profile) {
+        setProfile(data.profile);
+        setAutoFillResult({
+          fileName: file.name,
+          skillsCount: Array.isArray(data.profile.skills) ? data.profile.skills.length : 0,
+          expCount: Array.isArray(data.profile.experience) ? data.profile.experience.length : 0,
+          eduCount: Array.isArray(data.profile.education) ? data.profile.education.length : 0,
+        });
+        setSaveSuccess(true);
+      }
+    } catch (err: unknown) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : "Failed to auto-fill profile from resume.";
+      setSaveError(msg);
+    } finally {
+      setIsAutoFilling(false);
+      setAutoFillStatus("");
+      if (resumeFileInputRef.current) resumeFileInputRef.current.value = "";
+    }
+  };
 
   const handleFieldChange = (field: keyof ProfileData, value: unknown) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -375,6 +438,71 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
       {/* LEFT / MAIN COLUMN: Tabs & Form Content */}
       <div className="lg:col-span-8 space-y-6">
+        {/* Quick Resume Auto-Fill Action Banner */}
+        <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-[#0E1322] via-[#090D16] to-[#0E1322] border border-indigo-500/20 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex items-center gap-3 relative">
+            <div className="p-2.5 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shrink-0">
+              <Sparkles className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-white tracking-tight">
+                  Auto-Fill Profile From Resume
+                </h4>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                  100% Exact AI Parser
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Upload your PDF or DOCX resume to instantly populate all tabs with your exact details.
+              </p>
+            </div>
+          </div>
+
+          <div className="relative shrink-0 w-full sm:w-auto">
+            <input
+              type="file"
+              ref={resumeFileInputRef}
+              onChange={handleResumeAutoFill}
+              accept=".pdf,.docx,.doc,.txt"
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => resumeFileInputRef.current?.click()}
+              disabled={isAutoFilling}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-60"
+            >
+              {isAutoFilling ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>{autoFillStatus || "Parsing Resume..."}</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-4 h-4 text-white" />
+                  <span>Upload & Auto-Fill</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Auto-fill Success Result Notification */}
+        {autoFillResult && (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                Profile successfully populated from <strong>{autoFillResult.fileName}</strong>: {autoFillResult.skillsCount} skills, {autoFillResult.expCount} experience entries, and {autoFillResult.eduCount} education records loaded!
+              </span>
+            </div>
+            <span className="text-[10px] text-emerald-400/80 font-mono shrink-0">Ready to edit</span>
+          </div>
+        )}
+
         {/* Navigation Tabs Bar */}
         <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-[#090D16] border border-slate-800 overflow-x-auto scrollbar-none">
           {tabs.map((tab) => {

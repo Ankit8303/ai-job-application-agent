@@ -579,7 +579,8 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   const experience: ExperienceItem[] = [];
   let currentExp: ExperienceItem | null = null;
 
-  const dateRangePattern = /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?\d{4}\s*(?:-|–|to)\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?\d{4}|Present|Current)/i;
+  const dateRangePattern =
+    /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{2}|\d{4})\s*(?:-|–|—|to)\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{2}|\d{4})|Present|Current)|(?:\d{1,2}\/\d{2,4}\s*(?:-|–|—|to)\s*(?:\d{1,2}\/\d{2,4}|Present|Current))/i;
 
   for (let i = 0; i < expLines.length; i++) {
     const line = expLines[i];
@@ -595,17 +596,34 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
       let company = "";
       let jobTitle = "";
 
-      if (rest.includes("–") || rest.includes("-") || rest.includes("|")) {
-        const parts = rest.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
-        company = parts[0] || "Company";
-        jobTitle = parts[1] || "Software Developer";
-      } else if (rest.toLowerCase().includes(" at ")) {
-        const parts = rest.split(/\s+at\s+/i);
-        jobTitle = parts[0].trim();
-        company = parts[1].trim();
+      if (rest.length >= 4) {
+        if (rest.includes("–") || rest.includes("-") || rest.includes("|")) {
+          const parts = rest.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
+          company = parts[0] || "Company";
+          jobTitle = parts[1] || "Software Developer";
+        } else if (rest.toLowerCase().includes(" at ")) {
+          const parts = rest.split(/\s+at\s+/i);
+          jobTitle = parts[0].trim();
+          company = parts[1].trim();
+        } else {
+          company = rest;
+          jobTitle = "Software Developer";
+        }
       } else {
-        company = rest;
-        jobTitle = "Software Developer";
+        // Date was on its own line; look at previous lines
+        const prevLine = i > 0 ? expLines[i - 1] : "";
+        const prevPrevLine = i > 1 ? expLines[i - 2] : "";
+        if (prevLine && (prevLine.includes("–") || prevLine.includes("-") || prevLine.includes("|"))) {
+          const parts = prevLine.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
+          company = parts[0] || "Company";
+          jobTitle = parts[1] || "Software Developer";
+        } else if (prevLine && prevPrevLine) {
+          company = prevPrevLine;
+          jobTitle = prevLine;
+        } else {
+          company = prevLine || "Company";
+          jobTitle = "Software Developer";
+        }
       }
 
       currentExp = {
@@ -625,6 +643,11 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   }
   if (currentExp) {
     experience.push(currentExp);
+  }
+
+  // Derive headline from most recent role if not found in header
+  if (!headline && experience.length > 0 && experience[0].job_title) {
+    headline = `${experience[0].job_title}${experience[0].company_name ? ` at ${experience[0].company_name}` : ""}`;
   }
 
   // 5. Projects
@@ -674,43 +697,63 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   // 6. Education
   const eduLines = sections["education"] || [];
   const education: EducationItem[] = [];
-  const degreeRegex = /(?:Master|Bachelor|B\.?Sc|B\.?Tech|B\.?E|M\.?Tech|M\.?S|MCA|BCA|Diploma|Associate|Degree|Ph\.?D)/i;
+  const degreeRegex = /(?:Master|Bachelor|B\.?Sc|B\.?Tech|B\.?E|M\.?Tech|M\.?S|MCA|BCA|Diploma|Associate|Degree|Ph\.?D|High\s+School)/i;
+  const universityRegex = /(?:University|College|Institute|School|Academy|Polytechnic|Campus)/i;
 
   for (let i = 0; i < eduLines.length; i++) {
     const line = eduLines[i];
-    if (degreeRegex.test(line)) {
-      const nextLine = eduLines[i + 1] || "";
-      let institution = "University / College";
+    const nextLine = eduLines[i + 1] || "";
+    const isDegCurrent = degreeRegex.test(line);
+    const isUnivCurrent = universityRegex.test(line);
+    const isDegNext = degreeRegex.test(nextLine);
+    const isUnivNext = universityRegex.test(nextLine);
+
+    if (isDegCurrent || isUnivCurrent) {
+      let degree = "";
+      let institution = "";
       let gpa = "";
       let gradYear = "2024";
 
-      if (nextLine && !degreeRegex.test(nextLine)) {
-        const parenMatch = nextLine.match(/\((.*?)\)/);
-        if (parenMatch) {
-          gpa = parenMatch[1].trim();
-          institution = nextLine.replace(/\(.*?\)/, "").trim();
-        } else {
-          institution = nextLine.trim();
-        }
-        i++; // skip nextLine since it was consumed
+      if (isUnivCurrent && isDegNext) {
+        institution = line;
+        degree = nextLine;
+        i++;
+      } else if (isDegCurrent && isUnivNext) {
+        degree = line;
+        institution = nextLine;
+        i++;
+      } else if (isDegCurrent) {
+        degree = line;
+        institution = nextLine && !degreeRegex.test(nextLine) ? nextLine : "University / College";
+        if (nextLine && !degreeRegex.test(nextLine)) i++;
+      } else {
+        institution = line;
+        degree = nextLine || "Degree";
+        if (nextLine) i++;
       }
 
-      const yearMatch = (line + " " + nextLine).match(/\b(20\d{2}|19\d{2})\b/);
+      const combined = `${degree} ${institution}`;
+      const parenMatch = combined.match(/\((.*?)\)/);
+      if (parenMatch && !parenMatch[1].match(/^(?:MCA|BCA|B\.?Tech|M\.?Tech)$/i)) {
+        gpa = parenMatch[1].trim();
+      }
+
+      institution = institution.replace(/\(.*?\)/, "").split("|")[0].trim();
+      const yearMatch = combined.match(/\b(20\d{2}|19\d{2})\b/);
       if (yearMatch) gradYear = yearMatch[0];
 
-      let degree = line;
       let fieldOfStudy = "Computer Science";
-      if (line.includes(" in ")) {
-        const parts = line.split(" in ");
+      if (degree.includes(" in ")) {
+        const parts = degree.split(" in ");
         degree = parts[0].trim();
         fieldOfStudy = parts[1]
-          .replace(/\b(?:Punjab|UP|India|Maharashtra|Delhi|USA|UK)\b.*$/i, "")
+          .replace(/\b(?:Punjab|UP|India|Maharashtra|Delhi|USA|UK|California|New York)\b.*$/i, "")
           .trim();
       }
 
       education.push({
         institution: institution || "University",
-        degree: degree,
+        degree: degree || "Degree",
         field_of_study: fieldOfStudy,
         graduation_year: gradYear,
         gpa: gpa,

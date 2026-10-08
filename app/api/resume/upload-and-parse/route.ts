@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { parseResumeWithGemini } from "@/lib/gemini/resume-parser";
 
@@ -114,6 +115,14 @@ export async function POST(request: Request) {
 
     if (profileError) {
       console.error("Failed to update profile with resume data:", profileError);
+    }
+
+    try {
+      revalidatePath("/dashboard/profile");
+      revalidatePath("/dashboard/resume");
+      revalidatePath("/dashboard");
+    } catch (e) {
+      // Revalidation warning if in non-standard context
     }
 
     return NextResponse.json({
