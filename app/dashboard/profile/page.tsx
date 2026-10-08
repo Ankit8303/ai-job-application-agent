@@ -1,24 +1,65 @@
-import { User } from "lucide-react";
-import { BlankPagePlaceholder } from "@/components/dashboard/blank-page-placeholder";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { ProfileForm } from "@/components/dashboard/profile-form";
 
-export default function ProfilePage() {
+export const instant = false;
+
+export default async function ProfilePage() {
+  await connection();
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in?redirectedFrom=/dashboard/profile");
+  }
+
+  // Fetch candidate profile from public.profiles
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+
+  const initialProfile = {
+    id: user.id,
+    email: profile?.email || user.email || "",
+    full_name:
+      profile?.full_name ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      user.email?.split("@")[0] ||
+      "",
+    phone: profile?.phone || "",
+    location: profile?.location || "",
+    headline: profile?.headline || "Software Engineer",
+    summary: profile?.summary || "",
+    skills: Array.isArray(profile?.skills) ? profile.skills : [],
+    experience: Array.isArray(profile?.experience) ? profile.experience : [],
+    education: Array.isArray(profile?.education) ? profile.education : [],
+    projects: Array.isArray(profile?.projects) ? profile.projects : [],
+    certifications: Array.isArray(profile?.certifications)
+      ? profile.certifications
+      : [],
+    links: Array.isArray(profile?.links) ? profile.links : [],
+    onboarded: profile?.onboarded ?? false,
+  };
+
   return (
-    <div className="flex-1 flex flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-white">Profile</h1>
+    <div className="flex-1 flex flex-col space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-white">
+          Candidate Profile
+        </h1>
         <p className="text-xs sm:text-sm text-slate-400 mt-1">
-          View and edit your personal information, experience, and career preferences.
+          Review, customize, and save the profile information extracted by Gemini AI.
         </p>
       </div>
 
-      <div className="flex-1 rounded-2xl border border-slate-800/80 bg-slate-900/30 p-8 flex items-center justify-center">
-        <BlankPagePlaceholder
-          title="Professional Profile"
-          description="Manage your verified contact info, portfolio links, desired salary, and preferred work arrangements."
-          icon={User}
-          badge="Ready for Content"
-        />
-      </div>
+      <ProfileForm initialProfile={initialProfile} />
     </div>
   );
 }

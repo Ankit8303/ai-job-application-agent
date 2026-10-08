@@ -28,6 +28,14 @@ export default async function DashboardLayout({
     .eq("id", user.id)
     .single();
 
+  // Check if user has uploaded any resumes
+  const { count: resumeCount } = await supabase
+    .from("resumes")
+    .select("*", { count: "exact", head: true });
+
+  const needsOnboarding =
+    !profile?.onboarded && (resumeCount === 0 || resumeCount === null);
+
   return (
     <DashboardLayoutClient
       user={{
@@ -46,6 +54,7 @@ export default async function DashboardLayout({
           "",
         headline: profile?.headline || "",
       }}
+      needsOnboarding={needsOnboarding}
     >
       {children}
     </DashboardLayoutClient>

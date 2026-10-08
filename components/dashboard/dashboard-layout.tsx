@@ -25,6 +25,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
+import { OnboardingDialog } from "@/components/dashboard/onboarding-dialog";
+
 interface DashboardUser {
   id: string;
   email?: string;
@@ -35,11 +37,13 @@ interface DashboardUser {
 
 interface DashboardLayoutClientProps {
   user: DashboardUser;
+  needsOnboarding?: boolean;
   children: React.ReactNode;
 }
 
 export function DashboardLayoutClient({
   user,
+  needsOnboarding = false,
   children,
 }: DashboardLayoutClientProps) {
   const pathname = usePathname();
@@ -49,6 +53,7 @@ export function DashboardLayoutClient({
   // Collapsed state persisted in localStorage
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(needsOnboarding);
   const [credits, setCredits] = useState({ current: 42, max: 50 });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -436,6 +441,12 @@ export function DashboardLayoutClient({
           {children}
         </main>
       </div>
+
+      {/* Non-closable Onboarding Dialog for new users */}
+      <OnboardingDialog
+        isOpen={showOnboarding}
+        onSuccess={() => setShowOnboarding(false)}
+      />
     </div>
   );
 }
