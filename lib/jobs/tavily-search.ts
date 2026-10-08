@@ -241,18 +241,20 @@ async function executeTavilySearch(
   includeDomains: string[],
   apiKey?: string
 ): Promise<TavilySearchResult[]> {
+  const effectiveKey = (apiKey || process.env.TAVILY_API_KEY || "").trim();
+
   // If an API key is provided, use the official @tavily/core SDK
-  if (apiKey && apiKey.trim()) {
+  if (effectiveKey) {
     try {
-      const client = tavily({ apiKey: apiKey.trim() });
+      const client = tavily({ apiKey: effectiveKey });
       const response = await client.search(query, {
         includeDomains,
         searchDepth: "basic",
         maxResults: 10,
       });
       return (response.results || []) as TavilySearchResult[];
-    } catch (sdkErr) {
-      console.warn("Tavily SDK search error, trying REST API:", sdkErr);
+    } catch (sdkErr: any) {
+      console.warn("Tavily SDK search error:", sdkErr?.message || sdkErr);
     }
   }
 
@@ -299,45 +301,34 @@ async function searchTavilyPlatform(
   const platformDomainMap: Record<"greenhouse" | "lever" | "workable" | "wellfound", string[]> = {
     greenhouse: ["job-boards.greenhouse.io", "boards.greenhouse.io"],
     lever: ["jobs.lever.co"],
-    workable: ["apply.workable.com", "workable.com"],
+    workable: ["apply.workable.com"],
     wellfound: ["wellfound.com"],
   };
 
   const domains = platformDomainMap[platformKey];
 
-  // Strategy 1: Targeted query with candidate location if present
+  // Build targeted query
   const loc = profile.location?.trim();
-  if (loc && !/^(any|all|worldwide|global|n\/a)$/i.test(loc)) {
-    const locKeyword = loc.includes(",") ? loc.split(",")[0].trim() : loc;
-    const targetedQuery = `"${cleanRole}" ${locKeyword}`.trim();
-    try {
-      const results = await executeTavilySearch(targetedQuery, domains, apiKey);
-      const valid = filterValidPlatformResults(results, platformKey);
-      if (valid.length > 0) return valid;
-    } catch (err) {
-      console.warn(`Tavily targeted search error for ${platformKey}:`, err);
-    }
-  }
+  const locStr = loc && !/^(any|all|worldwide|global|n\/a)$/i.test(loc)
+    ? (loc.includes(",") ? loc.split(",")[0].trim() : loc)
+    : "";
 
-  // Strategy 2: Exact role query
+  const query = locStr ? `${cleanRole} ${locStr} jobs` : `${cleanRole} jobs`;
+
   try {
-    const exactQuery = `"${cleanRole}"`;
-    const results = await executeTavilySearch(exactQuery, domains, apiKey);
+    const results = await executeTavilySearch(query, domains, apiKey);
     const valid = filterValidPlatformResults(results, platformKey);
     if (valid.length > 0) return valid;
   } catch (err) {
-    console.warn(`Tavily exact role search error for ${platformKey}:`, err);
+    console.warn(`Tavily search error for ${platformKey}:`, err);
   }
 
-  // Strategy 3: Broad query
+  // Fallback with clean role alone
   try {
-    const broadQuery = `${cleanRole} jobs`;
-    const results = await executeTavilySearch(broadQuery, domains, apiKey);
-    const valid = filterValidPlatformResults(results, platformKey);
+    const fallbackResults = await executeTavilySearch(`"${cleanRole}"`, domains, apiKey);
+    const valid = filterValidPlatformResults(fallbackResults, platformKey);
     if (valid.length > 0) return valid;
-  } catch (err) {
-    console.warn(`Tavily broad search error for ${platformKey}:`, err);
-  }
+  } catch {}
 
   return [];
 }
