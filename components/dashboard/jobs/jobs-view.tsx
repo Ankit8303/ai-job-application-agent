@@ -82,7 +82,17 @@ export function JobsView({
         throw new Error(data.error || "Failed to fetch jobs.");
       }
 
-      setJobs(data.jobs || []);
+      const incoming = (data.jobs || []) as JobItem[];
+      setJobs((prev) => {
+        if (platform === "all" && forceRefresh) {
+          return incoming;
+        }
+        // Append & merge unique by job_url
+        const incomingUrls = new Set(incoming.map((j) => j.job_url));
+        const remaining = prev.filter((j) => !incomingUrls.has(j.job_url));
+        return [...incoming, ...remaining].sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+      });
+
       if (data.lastFetchedAt) {
         setCacheTimestamp(data.lastFetchedAt);
       }
@@ -93,6 +103,19 @@ export function JobsView({
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  // Handle platform card selection with on-demand Brave fetch if 0 jobs
+  const handleSelectPlatform = async (platform: JobPlatform) => {
+    setSelectedPlatform(platform);
+    if (platform !== "all") {
+      const hasJobsForPlatform = jobs.some(
+        (j) => j.platform.toLowerCase() === platform.toLowerCase()
+      );
+      if (!hasJobsForPlatform) {
+        await handleFetchJobs(false, platform);
+      }
     }
   };
 
@@ -265,7 +288,7 @@ export function JobsView({
           {selectedPlatform !== "all" && (
             <button
               type="button"
-              onClick={() => setSelectedPlatform("all")}
+              onClick={() => handleSelectPlatform("all")}
               className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer"
             >
               Reset to All Platforms
@@ -280,7 +303,7 @@ export function JobsView({
               platformKey={key}
               isSelected={selectedPlatform === key}
               count={platformCounts[key]}
-              onSelect={(p) => setSelectedPlatform(p)}
+              onSelect={(p) => handleSelectPlatform(p)}
             />
           ))}
         </div>
