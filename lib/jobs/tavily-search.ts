@@ -340,7 +340,7 @@ function generateTailoredFallbackJobs(
   userId: string,
   profile: UserProfileData,
   platform: "greenhouse" | "lever" | "workable" | "wellfound"
-): Omit<JobItem, "id" | "created_at">[] {
+): JobItem[] {
   const role = extractCleanRole(profile.headline, profile.skills);
   const userSkills = Array.isArray(profile.skills) && profile.skills.length > 0
     ? profile.skills
@@ -399,6 +399,7 @@ function generateTailoredFallbackJobs(
     const desc = `Exciting opportunity at ${item.company} as a ${cleanTitle}. You will architect and scale mission-critical systems with modern best practices in ${tags.join(", ")}.`;
 
     return {
+      id: crypto.randomUUID(),
       user_id: userId,
       platform,
       title: cleanTitle,
@@ -416,6 +417,7 @@ function generateTailoredFallbackJobs(
       applied_status: "not_applied",
       saved_status: false,
       fetched_at: now,
+      created_at: now,
     };
   });
 }
@@ -428,10 +430,11 @@ function normalizeTavilyResults(
   platformKey: "greenhouse" | "lever" | "workable" | "wellfound",
   userId: string,
   profile: UserProfileData
-): Omit<JobItem, "id" | "created_at">[] {
+): JobItem[] {
   const role = extractCleanRole(profile.headline, profile.skills);
   const userSkills = profile.skills || [];
   const expYears = profile.experience?.length ? profile.experience.length * 2 : 3;
+  const now = new Date().toISOString();
 
   return results.map((res) => {
     const company = extractCompany(res.title, res.url, platformKey);
@@ -447,6 +450,7 @@ function normalizeTavilyResults(
     const matchScore = calculateMatchScore(title, res.content, role, userSkills);
 
     return {
+      id: crypto.randomUUID(),
       user_id: userId,
       platform: platformKey,
       title: title || `${role} at ${company}`,
@@ -463,7 +467,8 @@ function normalizeTavilyResults(
       source_url: res.url,
       applied_status: "not_applied",
       saved_status: false,
-      fetched_at: new Date().toISOString(),
+      fetched_at: now,
+      created_at: now,
     };
   });
 }
@@ -526,7 +531,7 @@ export async function getOrFetchJobs(
 
     // On-demand fetch via Tavily and append to existing database jobs
     const tavilyApiKey = process.env.TAVILY_API_KEY;
-    let fetchedForPlatform: Omit<JobItem, "id" | "created_at">[] = [];
+    let fetchedForPlatform: JobItem[] = [];
 
     try {
       const tavilyResults = await searchTavilyPlatform(platformFilter, userProfile, tavilyApiKey);
@@ -564,14 +569,14 @@ export async function getOrFetchJobs(
         .order("match_score", { ascending: false });
 
       return {
-        jobs: updatedPlatformJobs || (fetchedForPlatform as any as JobItem[]),
+        jobs: (updatedPlatformJobs && updatedPlatformJobs.length > 0) ? updatedPlatformJobs : fetchedForPlatform,
         fromCache: false,
         lastFetchedAt: new Date().toISOString(),
       };
     } catch (appendErr) {
       console.error(`Error appending jobs for ${platformFilter}:`, appendErr);
       return {
-        jobs: fetchedForPlatform as any as JobItem[],
+        jobs: fetchedForPlatform,
         fromCache: false,
         lastFetchedAt: new Date().toISOString(),
       };
@@ -596,7 +601,7 @@ export async function getOrFetchJobs(
 
   // 4. Cache expired or forceRefresh -> Call Tavily for all 4 platforms
   const tavilyApiKey = process.env.TAVILY_API_KEY;
-  const allFetched: Omit<JobItem, "id" | "created_at">[] = [];
+  const allFetched: JobItem[] = [];
   const platforms: ("greenhouse" | "lever" | "workable" | "wellfound")[] = [
     "greenhouse",
     "lever",
@@ -605,7 +610,7 @@ export async function getOrFetchJobs(
   ];
 
   for (const plat of platforms) {
-    let platResults: Omit<JobItem, "id" | "created_at">[] = [];
+    let platResults: JobItem[] = [];
     try {
       const tavilyResults = await searchTavilyPlatform(plat, userProfile, tavilyApiKey);
       if (tavilyResults.length > 0) {
@@ -658,14 +663,14 @@ export async function getOrFetchJobs(
       .order("match_score", { ascending: false });
 
     return {
-      jobs: finalJobs || (jobsToUpsert as any as JobItem[]),
+      jobs: (finalJobs && finalJobs.length > 0) ? finalJobs : jobsToUpsert,
       fromCache: false,
       lastFetchedAt: new Date().toISOString(),
     };
   } catch (err) {
     console.error("Error saving fetched jobs:", err);
     return {
-      jobs: jobsToUpsert as any as JobItem[],
+      jobs: jobsToUpsert,
       fromCache: false,
       lastFetchedAt: new Date().toISOString(),
     };
