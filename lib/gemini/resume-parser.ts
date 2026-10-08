@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { GoogleGenerativeAI, Part } from "@google/generative-ai";
+import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 
 export interface ExperienceItem {
   company_name: string;
@@ -384,6 +384,11 @@ export async function parseResumeWithGemini(
   return parseResumeTextAccurately(extractedText);
 }
 
+function cleanGlyphs(str: string): string {
+  if (!str) return "";
+  return str.replace(/[\uE000-\uF8FF]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 /**
  * Exact structural parser that extracts real resume data without ANY dummy or fake values.
  */
@@ -405,7 +410,11 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
     };
   }
 
-  const text = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  const text = rawText
+    .replace(/(\w+)-\s*\n\s*(\w+)/g, "$1$2")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
   const rawLines = text
     .split("\n")
     .map((l) => l.trim())
@@ -433,14 +442,24 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
     }
   });
 
+  // Check text for LinkedIn/GitHub mention if links is empty
+  if (links.length === 0) {
+    if (/\b(?:linkedin|linked\.in)\b/i.test(text)) {
+      links.push({ label: "LinkedIn", url: "https://linkedin.com" });
+    }
+    if (/\b(?:github|git-hub)\b/i.test(text)) {
+      links.push({ label: "GitHub", url: "https://github.com" });
+    }
+  }
+
   // Name & Headline from Header Lines (Lines 0 to 5)
   let fullName = "";
   let headline = "";
   let location = "";
 
   for (let i = 0; i < Math.min(rawLines.length, 6); i++) {
-    const line = rawLines[i];
-    // Skip if line has email, phone, or section keywords
+    const rawLine = rawLines[i];
+    const line = cleanGlyphs(rawLine);
     if (line.includes("@") || /(?:summary|skills|experience|education|objective)/i.test(line)) {
       continue;
     }
@@ -459,21 +478,29 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
     }
   }
 
-  // Detect location from contact line containing email
+  // Detect location from contact line containing email or phone
   for (let i = 0; i < Math.min(rawLines.length, 6); i++) {
-    const line = rawLines[i];
-    if (line.includes("@") && line.includes("|")) {
-      const parts = line.split("|").map((p) => p.trim());
+    const cleanL = cleanGlyphs(rawLines[i]);
+    if (cleanL.includes("@") || cleanL.includes("+")) {
+      const parts = cleanL.split(/[|•·\t]/).map((p) => p.trim());
       for (const p of parts) {
         if (
           !p.includes("@") &&
           !p.match(/\d{5,}/) &&
-          !/(?:joiner|experience|year|dev|engineer|backend|fullstack)/i.test(p) &&
+          !/(?:joiner|experience|year|dev|engineer|backend|fullstack|github|linkedin)/i.test(p) &&
           p.length > 2 &&
           p.length < 50
         ) {
           location = p;
           break;
+        }
+      }
+      if (!location) {
+        const locMatch = cleanL.match(
+          /(?:[A-Z][a-zA-Z\s]+,\s*)+(?:India|USA|UK|Canada|Germany|Australia|[A-Z][a-zA-Z\s]+)/
+        );
+        if (locMatch) {
+          location = locMatch[0].trim();
         }
       }
     }
@@ -504,11 +531,11 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
     },
     {
       key: "certifications",
-      regex: /^(?:certifications?|licenses|training)\b[:\s]*/i,
+      regex: /^(?:certifications?|licenses|training|achievements|honors)\b[:\s]*/i,
     },
     {
       key: "additional",
-      regex: /^(?:additional\s+information|awards|honors|languages)\b[:\s]*/i,
+      regex: /^(?:additional\s+information|awards|languages)\b[:\s]*/i,
     },
   ];
 
@@ -535,20 +562,30 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
 
   // 2. Professional Summary
   const summaryLines = sections["summary"] || [];
-  const summary = summaryLines.join(" ").trim();
+  let summary = summaryLines.join(" ").trim();
+  if (!summary && rawLines.length > 2) {
+    for (let i = 1; i < Math.min(rawLines.length, 5); i++) {
+      const l = cleanGlyphs(rawLines[i]);
+      if (l.length > 40 && !l.includes("@") && !l.includes("+")) {
+        summary = l;
+        break;
+      }
+    }
+  }
 
   // 3. Technical Skills
   const skillsLines = sections["skills"] || [];
   const skillsSet = new Set<string>();
 
   const cleanSkillItem = (raw: string): string => {
-    let s = raw.trim().replace(/^[-•*·]\s*/, "").replace(/^[,\s]+|[,\s]+$/g, "");
+    let s = cleanGlyphs(raw).replace(/^[-•*·]\s*/, "").replace(/^[,\s.]+|[,\s.]+$/g, "");
     s = s.replace(/^\)+|\(+$/g, "").trim();
     return s;
   };
 
   skillsLines.forEach((line) => {
-    const content = line.includes(":") ? line.split(":")[1] : line;
+    const cleanL = cleanGlyphs(line);
+    const content = cleanL.includes(":") ? cleanL.split(":")[1] : cleanL;
     const parts = content.split(/[,|•·\n]/).map((s) => s.trim().replace(/^[-•*]\s*/, ""));
 
     for (const part of parts) {
@@ -559,7 +596,6 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
         !part.toLowerCase().includes("experience") &&
         !part.toLowerCase().includes("years")
       ) {
-        // Expand parentheses like "AWS (EC2, S3)" or clean up
         const parenMatch = part.match(/^(.*?)\s*\((.*?)\)$/);
         if (parenMatch) {
           if (parenMatch[1].trim()) skillsSet.add(cleanSkillItem(parenMatch[1]));
@@ -580,74 +616,80 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   let currentExp: ExperienceItem | null = null;
 
   const dateRangePattern =
-    /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{2}|\d{4})\s*(?:-|–|—|to)\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{2}|\d{4})|Present|Current)|(?:\d{1,2}\/\d{2,4}\s*(?:-|–|—|to)\s*(?:\d{1,2}\/\d{2,4}|Present|Current))/i;
+    /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{4}|\d{2})\s*(?:-|–|—|to)\s*(?:(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:\d{4}|\d{2})|Present|Current)|(?:\d{1,2}\/\d{4}\s*(?:-|–|—|to)\s*(?:\d{1,2}\/\d{4}|Present|Current))|(?:\d{1,2}\/\d{2}\s*(?:-|–|—|to)\s*(?:\d{1,2}\/\d{2}|Present|Current))/i;
 
   for (let i = 0; i < expLines.length; i++) {
-    const line = expLines[i];
-    const dateMatch = line.match(dateRangePattern);
+    const rawLine = expLines[i].trim();
+    const cleanLine = cleanGlyphs(rawLine);
+    const dateMatch = cleanLine.match(dateRangePattern);
 
     if (dateMatch) {
-      if (currentExp) {
-        experience.push(currentExp);
-      }
+      if (currentExp) experience.push(currentExp);
 
       const duration = dateMatch[0].trim();
-      const rest = line.replace(dateRangePattern, "").trim();
-      let company = "";
-      let jobTitle = "";
+      let location = "On-site / Remote";
+      const afterDate = cleanLine.replace(dateRangePattern, "").trim();
+      if (afterDate.length > 2) {
+        location = afterDate.replace(/^[–\-|•,\s]+|[–\-|•,\s]+$/g, "");
+      }
 
-      if (rest.length >= 4) {
-        if (rest.includes("–") || rest.includes("-") || rest.includes("|")) {
-          const parts = rest.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
-          company = parts[0] || "Company";
-          jobTitle = parts[1] || "Software Developer";
-        } else if (rest.toLowerCase().includes(" at ")) {
-          const parts = rest.split(/\s+at\s+/i);
-          jobTitle = parts[0].trim();
-          company = parts[1].trim();
-        } else {
-          company = rest;
-          jobTitle = "Software Developer";
-        }
-      } else {
-        // Date was on its own line; look at previous lines
-        const prevLine = i > 0 ? expLines[i - 1] : "";
-        const prevPrevLine = i > 1 ? expLines[i - 2] : "";
-        if (prevLine && (prevLine.includes("–") || prevLine.includes("-") || prevLine.includes("|"))) {
-          const parts = prevLine.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
-          company = parts[0] || "Company";
-          jobTitle = parts[1] || "Software Developer";
-        } else if (prevLine && prevPrevLine) {
-          company = prevPrevLine;
-          jobTitle = prevLine;
-        } else {
-          company = prevLine || "Company";
-          jobTitle = "Software Developer";
-        }
+      // Check preceding lines for Company and Title
+      const prev1 = i > 0 ? cleanGlyphs(expLines[i - 1]) : "";
+      const prev2 = i > 1 ? cleanGlyphs(expLines[i - 2]) : "";
+
+      let company = "Company";
+      let jobTitle = "Software Engineer";
+
+      if (prev1 && (prev1.includes("–") || prev1.includes("-") || prev1.includes("|"))) {
+        const parts = prev1.split(/[–\-|]/).map((p) => p.trim()).filter(Boolean);
+        company = parts[0] || "Company";
+        jobTitle = parts[1] || "Software Engineer";
+      } else if (
+        prev1 &&
+        prev2 &&
+        !prev2.startsWith("•") &&
+        !prev2.startsWith("-") &&
+        !prev1.startsWith("•")
+      ) {
+        jobTitle = prev2;
+        company = prev1;
+      } else if (prev1 && !prev1.startsWith("•")) {
+        company = prev1;
       }
 
       currentExp = {
         company_name: company,
         job_title: jobTitle,
         duration: duration,
-        location: "On-site / Remote",
+        location: location,
         responsibilities: [],
       };
-    } else if (currentExp) {
-      if (line.startsWith("•") || line.startsWith("-") || line.startsWith("*")) {
-        currentExp.responsibilities.push(line.replace(/^[•\-*]\s*/, ""));
-      } else if (!line.includes("·") && line.length > 20) {
-        currentExp.responsibilities.push(line);
+      continue;
+    }
+
+    if (currentExp) {
+      const isBullet = rawLine.startsWith("•") || rawLine.startsWith("-") || rawLine.startsWith("*");
+      const prevLine = i > 0 ? expLines[i - 1].trim() : "";
+
+      if (isBullet) {
+        const cleanB = rawLine.replace(/^[•\-*]\s*/, "").trim();
+        currentExp.responsibilities.push(cleanB);
+      } else if (prevLine.endsWith("-") && currentExp.responsibilities.length > 0) {
+        const lastIdx = currentExp.responsibilities.length - 1;
+        currentExp.responsibilities[lastIdx] =
+          currentExp.responsibilities[lastIdx].replace(/-$/, "") + rawLine;
+      } else if (rawLine.length > 15 && currentExp.responsibilities.length > 0) {
+        const lastIdx = currentExp.responsibilities.length - 1;
+        currentExp.responsibilities[lastIdx] += " " + rawLine;
       }
     }
   }
-  if (currentExp) {
-    experience.push(currentExp);
-  }
+  if (currentExp) experience.push(currentExp);
 
-  // Derive headline from most recent role if not found in header
   if (!headline && experience.length > 0 && experience[0].job_title) {
-    headline = `${experience[0].job_title}${experience[0].company_name ? ` at ${experience[0].company_name}` : ""}`;
+    headline =
+      experience[0].job_title +
+      (experience[0].company_name ? " at " + experience[0].company_name : "");
   }
 
   // 5. Projects
@@ -656,39 +698,79 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   let currentProj: ProjectItem | null = null;
 
   for (let i = 0; i < projLines.length; i++) {
-    const line = projLines[i];
-    const dateMatch = line.match(dateRangePattern);
+    const rawLine = projLines[i].trim();
+    const cleanLine = cleanGlyphs(rawLine);
+    if (!cleanLine) continue;
 
-    if (
-      dateMatch ||
-      (currentProj && (projLines[i + 1] || "").includes("·")) ||
-      (!currentProj && line.length < 50)
-    ) {
-      if (dateMatch || !currentProj) {
-        if (currentProj) projects.push(currentProj);
-        const title = line.replace(dateRangePattern, "").trim();
-        currentProj = {
-          title: title,
-          description: "",
-          technologies: [],
-          link: "",
-        };
-        continue;
-      }
+    const isBullet = rawLine.startsWith("•") || rawLine.startsWith("-") || rawLine.startsWith("*");
+    const cleanNoBullet = cleanLine.replace(/^[•\-*·]\s*/, "");
+    const isTechPrefix = /^tech(?:nologies|\s+used)?\b[:\s]/i.test(cleanNoBullet);
+    const isLinkOnly =
+      /^(?:github|gitlab|demo|live\s+demo|link|website)$/i.test(cleanLine) ||
+      /^https?:\/\//i.test(cleanLine);
+    const prevLine = i > 0 ? cleanGlyphs(projLines[i - 1]) : "";
+    const isContinuation = prevLine.endsWith("-") || /^[a-z]/.test(cleanLine);
+
+    const isNewTitle =
+      !isBullet && !isTechPrefix && !isLinkOnly && !isContinuation && cleanLine.length < 75;
+
+    if (isNewTitle) {
+      if (currentProj) projects.push(currentProj);
+      currentProj = {
+        title: cleanLine,
+        description: "",
+        technologies: [],
+        link: "",
+      };
+      continue;
     }
 
     if (currentProj) {
-      if (line.startsWith("•") || line.startsWith("-")) {
-        const bullet = line.replace(/^[•\-*]\s*/, "");
+      if (isLinkOnly) {
+        if (/^github$/i.test(cleanLine)) {
+          const ghLink = links.find((l) => l.label.toLowerCase() === "github");
+          currentProj.link = ghLink?.url || "https://github.com";
+        } else {
+          currentProj.link = cleanLine;
+        }
+      } else if (
+        isTechPrefix ||
+        cleanLine.includes("Tech Used:") ||
+        cleanLine.includes("Technologies:")
+      ) {
+        const rawTech = cleanLine
+          .replace(/^[•\-*·]\s*/, "")
+          .replace(/^tech(?:nologies|\s+used)?\b[:\s]*/i, "")
+          .trim();
+        const techList = rawTech
+          .split(/[,|•·/]/)
+          .map((t) => t.trim().replace(/\.$/, ""))
+          .filter(Boolean);
+        currentProj.technologies.push(...techList);
+        if (
+          projLines[i + 1] &&
+          !projLines[i + 1].startsWith("•") &&
+          !projLines[i + 1].startsWith("-") &&
+          projLines[i + 1].includes(",")
+        ) {
+          const nextTech = cleanGlyphs(projLines[i + 1])
+            .split(/[,|•·/]/)
+            .map((t) => t.trim().replace(/\.$/, ""))
+            .filter(Boolean);
+          currentProj.technologies.push(...nextTech);
+          i++;
+        }
+      } else if (isBullet) {
+        const cleanBullet = rawLine.replace(/^[•\-*·]\s*/, "").trim();
         currentProj.description = currentProj.description
-          ? currentProj.description + " " + bullet
-          : bullet;
-      } else if (line.includes(",") && !currentProj.technologies.length && line.length < 150) {
-        currentProj.technologies = line.split(",").map((t) => t.trim()).filter(Boolean);
-      } else if (line.length > 20) {
+          ? currentProj.description + " " + cleanBullet
+          : cleanBullet;
+      } else if (prevLine.endsWith("-")) {
+        currentProj.description = currentProj.description.replace(/-$/, "") + cleanLine;
+      } else {
         currentProj.description = currentProj.description
-          ? currentProj.description + " " + line
-          : line;
+          ? currentProj.description + " " + cleanLine
+          : cleanLine;
       }
     }
   }
@@ -697,12 +779,13 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
   // 6. Education
   const eduLines = sections["education"] || [];
   const education: EducationItem[] = [];
-  const degreeRegex = /(?:Master|Bachelor|B\.?Sc|B\.?Tech|B\.?E|M\.?Tech|M\.?S|MCA|BCA|Diploma|Associate|Degree|Ph\.?D|High\s+School)/i;
+  const degreeRegex =
+    /(?:Master|Bachelor|B\.?Sc|B\.?Tech|B\.?E|M\.?Tech|M\.?S|MCA|BCA|Diploma|Associate|Degree|Ph\.?D|High\s+School)/i;
   const universityRegex = /(?:University|College|Institute|School|Academy|Polytechnic|Campus)/i;
 
   for (let i = 0; i < eduLines.length; i++) {
-    const line = eduLines[i];
-    const nextLine = eduLines[i + 1] || "";
+    const line = cleanGlyphs(eduLines[i]);
+    const nextLine = eduLines[i + 1] ? cleanGlyphs(eduLines[i + 1]) : "";
     const isDegCurrent = degreeRegex.test(line);
     const isUnivCurrent = universityRegex.test(line);
     const isDegNext = degreeRegex.test(nextLine);
@@ -732,15 +815,44 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
         if (nextLine) i++;
       }
 
-      const combined = `${degree} ${institution}`;
+      // Look ahead for GPA, CGPA, and Graduation Year range on subsequent lines
+      let j = i + 1;
+      while (
+        j < eduLines.length &&
+        !degreeRegex.test(eduLines[j]) &&
+        !universityRegex.test(eduLines[j])
+      ) {
+        const extraL = cleanGlyphs(eduLines[j]);
+        const gpaMatch =
+          extraL.match(/(?:CGPA|GPA|Score|Marks)[:\s]*([\d.]+(?:\s*\/\s*[\d.]+)?%?)/i) ||
+          extraL.match(/\b(\d\.\d{1,2}\s*\/\s*10(?:\.0)?|\d\.\d{1,2}\s*\/\s*4(?:\.0)?|\d{2}(?:\.\d+)?%)\b/i);
+        if (gpaMatch && !gpa) {
+          gpa = gpaMatch[0].trim();
+        }
+        const yrRangeMatch = extraL.match(/(\d{4})\s*(?:–|-|—|to)\s*(\d{4})/);
+        if (yrRangeMatch) {
+          gradYear = yrRangeMatch[2];
+        } else {
+          const singleYr = extraL.match(/\b(20\d{2}|19\d{2})\b/);
+          if (singleYr && gradYear === "2024") {
+            gradYear = singleYr[0];
+          }
+        }
+        j++;
+      }
+      i = j - 1;
+
+      const combined = degree + " " + institution;
       const parenMatch = combined.match(/\((.*?)\)/);
-      if (parenMatch && !parenMatch[1].match(/^(?:MCA|BCA|B\.?Tech|M\.?Tech)$/i)) {
+      if (parenMatch && !parenMatch[1].match(/^(?:MCA|BCA|B\.?Tech|M\.?Tech)$/i) && !gpa) {
         gpa = parenMatch[1].trim();
       }
 
       institution = institution.replace(/\(.*?\)/, "").split("|")[0].trim();
-      const yearMatch = combined.match(/\b(20\d{2}|19\d{2})\b/);
-      if (yearMatch) gradYear = yearMatch[0];
+      if (gradYear === "2024") {
+        const yearMatch = combined.match(/\b(20\d{2}|19\d{2})\b/);
+        if (yearMatch) gradYear = yearMatch[0];
+      }
 
       let fieldOfStudy = "Computer Science";
       if (degree.includes(" in ")) {
@@ -761,29 +873,54 @@ export function parseResumeTextAccurately(rawText: string): ParsedResumeData {
     }
   }
 
-  // 7. Certifications
+  // 7. Certifications & Achievements
   const certLines = sections["certifications"] || [];
   const allCertSources =
     certLines.length > 0 ? certLines : sections["additional"] || [];
   const certifications: CertificationItem[] = [];
 
-  for (const line of allCertSources) {
-    if (line.toLowerCase().includes("certifications:") || certLines.length > 0) {
-      const content = line.includes(":") ? line.split(":")[1] : line;
-      const certNames = content.split(/[,;]/).map((c) => c.trim()).filter(Boolean);
-      for (const c of certNames) {
-        if (c.length > 2 && c.length < 60) {
-          let issuer = "Accredited Authority";
-          if (c.includes("AWS")) issuer = "Amazon Web Services";
-          else if (c.includes("Google")) issuer = "Google";
-          else if (c.includes("MSBTE")) issuer = "MSBTE";
-          certifications.push({
-            name: c,
-            issuer: issuer,
-            year: "2024",
-          });
-        }
-      }
+  for (let i = 0; i < allCertSources.length; i++) {
+    let cleanL = cleanGlyphs(allCertSources[i]);
+    if (!cleanL) continue;
+
+    // Handle multiline continuation if next line is not a bullet
+    while (
+      i + 1 < allCertSources.length &&
+      !allCertSources[i + 1].startsWith("•") &&
+      !allCertSources[i + 1].startsWith("-") &&
+      !allCertSources[i + 1].startsWith("*") &&
+      !cleanL.endsWith(".")
+    ) {
+      cleanL = cleanL + " " + cleanGlyphs(allCertSources[i + 1]);
+      i++;
+    }
+
+    const cleanName = cleanL.replace(/^[•\-*·]\s*/, "").replace(/\.$/, "").trim();
+    if (cleanName.length > 5) {
+      const yearMatch = cleanName.match(/\b(20\d{2})\b/);
+      let issuer = "Accredited Authority";
+      if (/Udemy/i.test(cleanName)) issuer = "Udemy";
+      else if (/HackerRank/i.test(cleanName)) issuer = "HackerRank";
+      else if (/LeetCode/i.test(cleanName)) issuer = "LeetCode";
+      else if (/AWS|Amazon/i.test(cleanName)) issuer = "Amazon Web Services";
+      else if (/Google/i.test(cleanName)) issuer = "Google";
+      else if (/Coursera/i.test(cleanName)) issuer = "Coursera";
+      else if (/University|College/i.test(cleanName)) issuer = "Academic Honor";
+      else if (/Hackathon/i.test(cleanName)) issuer = "Hackathon Organizing Committee";
+
+      certifications.push({
+        name: cleanName,
+        issuer: issuer,
+        year: yearMatch ? yearMatch[0] : "",
+      });
+    }
+  }
+
+  // 8. Auto-generate professional summary if none present
+  if (!summary) {
+    if (headline && skillsSet.size > 0) {
+      const topSkills = Array.from(skillsSet).slice(0, 5).join(", ");
+      summary = `${headline} experienced in building robust applications, full-stack architectures, and high-performance services with ${topSkills}.`;
     }
   }
 
