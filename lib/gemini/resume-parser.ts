@@ -115,6 +115,8 @@ export async function parseResumeWithGemini(
   }
 
   try {
+    const selectedModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
     // 1. Try with the official modern @google/genai SDK
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -138,7 +140,7 @@ export async function parseResumeWithGemini(
           ];
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: selectedModel,
         contents: [
           {
             role: "user",
@@ -165,7 +167,7 @@ export async function parseResumeWithGemini(
     // 2. Try with @google/generative-ai fallback
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: selectedModel,
       generationConfig: {
         responseMimeType: "application/json",
       },
