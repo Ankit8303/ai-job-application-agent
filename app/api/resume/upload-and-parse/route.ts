@@ -78,24 +78,30 @@ export async function POST(request: Request) {
     }
 
     // 4. Update user profile in public.profiles with extracted data
+    const safeFullName =
+      parsedData.full_name &&
+      !parsedData.full_name.startsWith("%PDF") &&
+      parsedData.full_name !== "Candidate"
+        ? parsedData.full_name
+        : user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split("@")[0] ||
+          "Candidate";
+
     const profileUpdateData = {
       id: user.id,
       email: user.email,
-      full_name:
-        parsedData.full_name ||
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email?.split("@")[0],
+      full_name: safeFullName,
       phone: parsedData.phone || null,
       location: parsedData.location || null,
       headline: parsedData.headline || "Software Engineer",
       summary: parsedData.summary || null,
-      skills: parsedData.skills || [],
-      experience: parsedData.experience || [],
-      education: parsedData.education || [],
-      projects: parsedData.projects || [],
-      certifications: parsedData.certifications || [],
-      links: parsedData.links || [],
+      skills: Array.isArray(parsedData.skills) ? parsedData.skills : [],
+      experience: Array.isArray(parsedData.experience) ? parsedData.experience : [],
+      education: Array.isArray(parsedData.education) ? parsedData.education : [],
+      projects: Array.isArray(parsedData.projects) ? parsedData.projects : [],
+      certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : [],
+      links: Array.isArray(parsedData.links) ? parsedData.links : [],
       onboarded: true,
       updated_at: new Date().toISOString(),
     };
