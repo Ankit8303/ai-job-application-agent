@@ -226,6 +226,10 @@ export function heuristicParseResume(text: string): ParsedResumeData {
     return { label, url };
   });
 
+  function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   // Extract common tech skills
   const knownSkills = [
     "JavaScript", "TypeScript", "React", "Next.js", "Node.js", "Python",
@@ -233,9 +237,10 @@ export function heuristicParseResume(text: string): ParsedResumeData {
     "Docker", "AWS", "GraphQL", "REST APIs", "C++", "Java", "Go",
     "MongoDB", "Prisma", "Express", "Redux", "Linux", "CI/CD", "Machine Learning"
   ];
-  const detectedSkills = knownSkills.filter((s) =>
-    new RegExp(`\\b${s}\\b`, "i").test(clean)
-  );
+  const detectedSkills = knownSkills.filter((s) => {
+    const escaped = escapeRegex(s);
+    return new RegExp(`(?:^|[^a-zA-Z0-9+#])${escaped}(?:[^a-zA-Z0-9+#]|$)`, "i").test(clean);
+  });
 
   return {
     full_name: candidateName,
