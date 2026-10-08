@@ -17,6 +17,7 @@
     "@shadcn/react": "^0.3.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",
+    "@tavily/core": "^0.7.14",
     "@types/pdf-parse": "^1.1.5",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",

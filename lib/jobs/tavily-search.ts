@@ -1,20 +1,13 @@
-import { JobItem, PLATFORMS } from "./types";
+import { JobItem, PLATFORMS, JobPlatform } from "./types";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { tavily } from "@tavily/core";
 
-interface BraveWebResult {
+export interface TavilySearchResult {
   title: string;
   url: string;
-  description: string;
-  meta_url?: {
-    hostname?: string;
-    path?: string;
-  };
-}
-
-interface BraveSearchResponse {
-  web?: {
-    results?: BraveWebResult[];
-  };
+  content: string;
+  score?: number;
+  raw_content?: string | null;
 }
 
 interface UserProfileData {
@@ -105,16 +98,13 @@ function calculateMatchScore(
   return Math.min(98, Math.max(78, score));
 }
 
-/**
- * Helper to capitalize word
- */
 function capitalizeWord(str: string): string {
   if (!str) return "";
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 /**
- * Cleans raw job title from Brave search results
+ * Cleans raw job title from search results
  */
 function cleanJobTitle(rawTitle: string, company: string): string {
   let title = rawTitle
@@ -143,7 +133,7 @@ function cleanJobTitle(rawTitle: string, company: string): string {
  * Extracts company name from job title, URL, or snippet
  */
 function extractCompany(rawTitle: string, url: string, platform: string): string {
-  // 1. Try "at <Company>" in title (e.g. "Software Engineer at Stripe", "Engineer at Honeycomb.io")
+  // 1. Try "at <Company>" in title
   const atMatch = rawTitle.match(/(?:at|@)\s+([A-Za-z0-9&.\s-]+?)(?:\s*[-–—|•:]|\s*$)/i);
   if (atMatch && atMatch[1]?.trim().length > 1) {
     const name = atMatch[1].trim().replace(/\.io$/i, "").replace(/\.com$/i, "");
@@ -152,12 +142,11 @@ function extractCompany(rawTitle: string, url: string, platform: string): string
     }
   }
 
-  // 2. Try extraction from URL path or subdomain
+  // 2. Try extraction from URL path
   try {
     const parsed = new URL(url);
     const parts = parsed.pathname.split("/").filter(Boolean);
 
-    // boards.greenhouse.io/<company>/jobs/... or job-boards.greenhouse.io/<company>/jobs/...
     if ((platform === "greenhouse" || parsed.hostname.includes("greenhouse")) && parts.length > 0) {
       const seg = parts[0];
       if (seg && seg !== "jobs" && seg !== "embed") {
@@ -165,7 +154,6 @@ function extractCompany(rawTitle: string, url: string, platform: string): string
       }
     }
 
-    // jobs.lever.co/<company>/<uuid>
     if ((platform === "lever" || parsed.hostname.includes("lever")) && parts.length > 0) {
       const seg = parts[0];
       if (seg && seg !== "jobs") {
@@ -173,7 +161,6 @@ function extractCompany(rawTitle: string, url: string, platform: string): string
       }
     }
 
-    // apply.workable.com/<company>/j/...
     if ((platform === "workable" || parsed.hostname.includes("workable")) && parts.length > 0) {
       const seg = parts[0];
       if (seg && seg !== "j" && seg !== "jobs") {
@@ -181,7 +168,6 @@ function extractCompany(rawTitle: string, url: string, platform: string): string
       }
     }
 
-    // wellfound.com/jobs/<id>-<slug>
     if (platform === "wellfound" || parsed.hostname.includes("wellfound")) {
       const bulletMatch = rawTitle.match(/(?:at|@)\s+([A-Za-z0-9&.\s]+?)(?:\s*•|\s*$)/i);
       if (bulletMatch && bulletMatch[1]?.trim().length > 1) {
@@ -207,9 +193,6 @@ function extractCompany(rawTitle: string, url: string, platform: string): string
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-/**
- * Builds realistic salary range based on role and experience level
- */
 function deriveSalary(role: string, expLevel: string): string {
   const isSenior = expLevel.toLowerCase().includes("senior") || role.toLowerCase().includes("senior") || role.toLowerCase().includes("lead");
   const isLead = role.toLowerCase().includes("lead") || role.toLowerCase().includes("architect") || role.toLowerCase().includes("principal");
@@ -223,9 +206,6 @@ function deriveSalary(role: string, expLevel: string): string {
   }
 }
 
-/**
- * Derives experience level from title or user profile
- */
 function deriveExperienceLevel(title: string, userYears: number): string {
   const lower = title.toLowerCase();
   if (lower.includes("lead") || lower.includes("principal") || lower.includes("staff")) return "Lead / Staff";
@@ -236,171 +216,134 @@ function deriveExperienceLevel(title: string, userYears: number): string {
   return "Mid-Level";
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
- * Builds platform-specific search query based on selected platform, user role, and optional location
- * Examples:
- * - Greenhouse: site:job-boards.greenhouse.io OR site:boards.greenhouse.io "React Developer"
- * - Lever: site:jobs.lever.co "React Developer"
- * - Workable: site:apply.workable.com "React Developer"
- * - Wellfound: site:wellfound.com/jobs "React Developer"
- */
-function buildPlatformSearchQuery(
-  platformKey: "greenhouse" | "lever" | "workable" | "wellfound",
-  cleanRole: string,
-  location?: string | null
-): { primaryQuery: string; broadQuery: string } {
-  let sitePrefix = "";
-  if (platformKey === "greenhouse") {
-    sitePrefix = "site:job-boards.greenhouse.io OR site:boards.greenhouse.io";
-  } else if (platformKey === "lever") {
-    sitePrefix = "site:jobs.lever.co";
-  } else if (platformKey === "workable") {
-    sitePrefix = "site:apply.workable.com";
-  } else if (platformKey === "wellfound") {
-    sitePrefix = "site:wellfound.com/jobs";
-  }
-
-  const broadQuery = `${sitePrefix} "${cleanRole}"`.trim();
-
-  // If user has a specific location, build targeted primary query
-  const loc = location?.trim();
-  if (loc && !/^(any|all|worldwide|global|n\/a)$/i.test(loc)) {
-    // If it has comma like "San Francisco, CA", take the primary city or "Remote"
-    const locKeyword = loc.includes(",") ? loc.split(",")[0].trim() : loc;
-    const primaryQuery = `${sitePrefix} "${cleanRole}" ${locKeyword}`.trim();
-    return { primaryQuery, broadQuery };
-  }
-
-  return { primaryQuery: broadQuery, broadQuery };
-}
-
-/**
- * Low-level Brave Search API fetcher with rate limit spacing (1 req/sec) and 429 backoff retry
- */
-async function executeBraveSearch(
-  query: string,
-  apiKey: string,
-  freshness?: string
-): Promise<BraveWebResult[]> {
-  const params = new URLSearchParams({
-    q: query,
-    count: "10",
-  });
-  if (freshness) {
-    params.set("freshness", freshness);
-  }
-
-  // Respect Brave Free Tier 1 req/second limit
-  await sleep(1100);
-
-  let response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      "X-Subscription-Token": apiKey,
-    },
-  });
-
-  // Handle 429 rate limit with backoff retry
-  if (response.status === 429) {
-    console.warn("Brave API rate limit reached (429). Retrying after 1.5s backoff...");
-    await sleep(1500);
-    response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "X-Subscription-Token": apiKey,
-      },
-    });
-  }
-
-  if (!response.ok) {
-    console.warn(`Brave API HTTP ${response.status} for query: ${query}`);
-    return [];
-  }
-
-  const data: BraveSearchResponse = await response.json();
-  return data.web?.results || [];
-}
-
-/**
- * Filter raw Brave search results to ensure they link to actual job postings
+ * Filter search results to ensure they link to actual job postings
  */
 function filterValidPlatformResults(
-  results: BraveWebResult[],
+  results: TavilySearchResult[],
   platformKey: "greenhouse" | "lever" | "workable" | "wellfound"
-): BraveWebResult[] {
+): TavilySearchResult[] {
   return results.filter((r) => {
     const u = r.url.toLowerCase();
     if (platformKey === "greenhouse") return u.includes("greenhouse.io/") && u.includes("/jobs/");
     if (platformKey === "lever") return u.includes("jobs.lever.co/") && u.split("/").length >= 5;
     if (platformKey === "workable") return u.includes("workable.com/") && (u.includes("/j/") || u.includes("/jobs/"));
-    if (platformKey === "wellfound") return u.includes("wellfound.com/jobs/");
+    if (platformKey === "wellfound") return u.includes("wellfound.com/") && (u.includes("/jobs/") || u.includes("/role/"));
     return true;
   });
 }
 
 /**
- * Executes Brave Search API query with multiple freshness fallbacks and rate limit safety
+ * Executes a search using Tavily (@tavily/core SDK or keyless REST API)
  */
-async function searchBravePlatform(
+async function executeTavilySearch(
+  query: string,
+  includeDomains: string[],
+  apiKey?: string
+): Promise<TavilySearchResult[]> {
+  // If an API key is provided, use the official @tavily/core SDK
+  if (apiKey && apiKey.trim()) {
+    try {
+      const client = tavily({ apiKey: apiKey.trim() });
+      const response = await client.search(query, {
+        includeDomains,
+        searchDepth: "basic",
+        maxResults: 10,
+      });
+      return (response.results || []) as TavilySearchResult[];
+    } catch (sdkErr) {
+      console.warn("Tavily SDK search error, trying REST API:", sdkErr);
+    }
+  }
+
+  // Keyless REST API fallback (as defined in Tavily agent-setup SKILL.md Path E)
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tavily-Access-Mode": "keyless",
+      },
+      body: JSON.stringify({
+        query,
+        include_domains: includeDomains,
+        search_depth: "basic",
+        max_results: 10,
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn(`Tavily keyless search HTTP ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json();
+    return (data.results || []) as TavilySearchResult[];
+  } catch (restErr) {
+    console.error("Tavily REST search error:", restErr);
+    return [];
+  }
+}
+
+/**
+ * Searches a specific platform using Tavily
+ */
+async function searchTavilyPlatform(
   platformKey: "greenhouse" | "lever" | "workable" | "wellfound",
   profile: UserProfileData,
-  apiKey: string
-): Promise<BraveWebResult[]> {
+  apiKey?: string
+): Promise<TavilySearchResult[]> {
   const cleanRole = extractCleanRole(profile.headline, profile.skills);
-  const { primaryQuery, broadQuery } = buildPlatformSearchQuery(platformKey, cleanRole, profile.location);
 
-  // Strategy 1: Targeted query with freshness 'pw' (if location provided)
-  if (primaryQuery !== broadQuery) {
+  // Platform domain mapping
+  const platformDomainMap: Record<"greenhouse" | "lever" | "workable" | "wellfound", string[]> = {
+    greenhouse: ["job-boards.greenhouse.io", "boards.greenhouse.io"],
+    lever: ["jobs.lever.co"],
+    workable: ["apply.workable.com", "workable.com"],
+    wellfound: ["wellfound.com"],
+  };
+
+  const domains = platformDomainMap[platformKey];
+
+  // Strategy 1: Targeted query with candidate location if present
+  const loc = profile.location?.trim();
+  if (loc && !/^(any|all|worldwide|global|n\/a)$/i.test(loc)) {
+    const locKeyword = loc.includes(",") ? loc.split(",")[0].trim() : loc;
+    const targetedQuery = `"${cleanRole}" ${locKeyword}`.trim();
     try {
-      const results = await executeBraveSearch(primaryQuery, apiKey, "pw");
+      const results = await executeTavilySearch(targetedQuery, domains, apiKey);
       const valid = filterValidPlatformResults(results, platformKey);
       if (valid.length > 0) return valid;
     } catch (err) {
-      console.warn(`Brave search targeted query error for ${platformKey}:`, err);
+      console.warn(`Tavily targeted search error for ${platformKey}:`, err);
     }
   }
 
-  // Strategy 2: Role query with freshness (pw for Greenhouse/Lever, none for Workable/Wellfound)
-  const freshnessSequence =
-    platformKey === "greenhouse" || platformKey === "lever"
-      ? ["pw", undefined]
-      : [undefined, "pw", "pm"];
-
-  for (const freshness of freshnessSequence) {
-    try {
-      const results = await executeBraveSearch(broadQuery, apiKey, freshness);
-      const valid = filterValidPlatformResults(results, platformKey);
-      if (valid.length > 0) return valid;
-    } catch (err) {
-      console.warn(`Brave search broad query error for ${platformKey} (${freshness}):`, err);
-    }
-  }
-
-  // Strategy 3: Unquoted query fallback
+  // Strategy 2: Exact role query
   try {
-    let sitePrefix = "";
-    if (platformKey === "greenhouse") sitePrefix = "site:job-boards.greenhouse.io OR site:boards.greenhouse.io";
-    else if (platformKey === "lever") sitePrefix = "site:jobs.lever.co";
-    else if (platformKey === "workable") sitePrefix = "site:apply.workable.com";
-    else sitePrefix = "site:wellfound.com/jobs";
-
-    const unquotedQuery = `${sitePrefix} ${cleanRole}`;
-    const results = await executeBraveSearch(unquotedQuery, apiKey);
+    const exactQuery = `"${cleanRole}"`;
+    const results = await executeTavilySearch(exactQuery, domains, apiKey);
     const valid = filterValidPlatformResults(results, platformKey);
     if (valid.length > 0) return valid;
-  } catch (fallbackErr) {
-    console.warn(`Unquoted fallback failed for ${platformKey}:`, fallbackErr);
+  } catch (err) {
+    console.warn(`Tavily exact role search error for ${platformKey}:`, err);
+  }
+
+  // Strategy 3: Broad query
+  try {
+    const broadQuery = `${cleanRole} jobs`;
+    const results = await executeTavilySearch(broadQuery, domains, apiKey);
+    const valid = filterValidPlatformResults(results, platformKey);
+    if (valid.length > 0) return valid;
+  } catch (err) {
+    console.warn(`Tavily broad search error for ${platformKey}:`, err);
   }
 
   return [];
 }
 
 /**
- * Intelligent tailored fallback generator when Brave API key is not set or returns no results.
+ * Intelligent tailored fallback generator when search yields no results
  */
 function generateTailoredFallbackJobs(
   userId: string,
@@ -487,10 +430,10 @@ function generateTailoredFallbackJobs(
 }
 
 /**
- * Normalizes Brave search results into Supabase JobItem objects
+ * Normalizes Tavily search results into Supabase JobItem objects
  */
-function normalizeBraveResults(
-  results: BraveWebResult[],
+function normalizeTavilyResults(
+  results: TavilySearchResult[],
   platformKey: "greenhouse" | "lever" | "workable" | "wellfound",
   userId: string,
   profile: UserProfileData
@@ -507,10 +450,10 @@ function normalizeBraveResults(
 
     // Match skills in title and description
     const matchedSkills = userSkills.filter(
-      (s) => title.toLowerCase().includes(s.toLowerCase()) || res.description.toLowerCase().includes(s.toLowerCase())
+      (s) => title.toLowerCase().includes(s.toLowerCase()) || res.content.toLowerCase().includes(s.toLowerCase())
     );
     const tags = matchedSkills.length > 0 ? matchedSkills.slice(0, 4) : userSkills.slice(0, 3);
-    const matchScore = calculateMatchScore(title, res.description, role, userSkills);
+    const matchScore = calculateMatchScore(title, res.content, role, userSkills);
 
     return {
       user_id: userId,
@@ -522,7 +465,7 @@ function normalizeBraveResults(
       salary,
       job_type: "Full-time",
       experience_level: expLevel,
-      description: res.description,
+      description: res.content,
       tags: tags.length ? tags : ["Tech", "Engineering"],
       match_score: matchScore,
       job_url: res.url,
@@ -535,10 +478,10 @@ function normalizeBraveResults(
 }
 
 /**
- * Main Fetch & Cache Engine:
+ * Main Fetch & Cache Engine with Tavily:
  * 1. Checks Supabase for cached jobs (within 6 hours).
- * 2. If a specific platform is selected and has 0 jobs in DB, calls Brave API for that platform and APPENDS to DB.
- * 3. If older than 6 hours (or forceRefresh), calls Brave Search API, updates DB, and returns latest jobs.
+ * 2. If a specific platform is selected and has 0 jobs in DB, calls Tavily for that platform and APPENDS to DB.
+ * 3. If older than 6 hours (or forceRefresh), calls Tavily Search API, updates DB, and returns latest jobs.
  */
 export async function getOrFetchJobs(
   supabase: SupabaseClient,
@@ -590,21 +533,20 @@ export async function getOrFetchJobs(
       }
     }
 
-    // REQUIREMENT: "If no jobs found for give select platform, then make sure to call Brave API to fetch it and append that data to exising database jobs"
-    const braveApiKey = process.env.BRAVE_SEARCH_API_KEY || process.env.BRAVE_API_KEY || "BSAQgZheRaOHWI8XRgM5Y40YSNZvIOj";
-
+    // On-demand fetch via Tavily and append to existing database jobs
+    const tavilyApiKey = process.env.TAVILY_API_KEY;
     let fetchedForPlatform: Omit<JobItem, "id" | "created_at">[] = [];
 
     try {
-      const braveResults = await searchBravePlatform(platformFilter, userProfile, braveApiKey);
-      if (braveResults.length > 0) {
-        fetchedForPlatform = normalizeBraveResults(braveResults, platformFilter, userId, userProfile);
+      const tavilyResults = await searchTavilyPlatform(platformFilter, userProfile, tavilyApiKey);
+      if (tavilyResults.length > 0) {
+        fetchedForPlatform = normalizeTavilyResults(tavilyResults, platformFilter, userId, userProfile);
       }
     } catch (err) {
-      console.warn(`Brave API fetch error for ${platformFilter}:`, err);
+      console.warn(`Tavily search error for ${platformFilter}:`, err);
     }
 
-    // If Brave returned fewer than 3, supplement with tailored fallbacks
+    // If Tavily returned fewer than 3, supplement with tailored fallbacks
     if (fetchedForPlatform.length < 3) {
       const fallbacks = generateTailoredFallbackJobs(userId, userProfile, platformFilter);
       const existingUrls = new Set(fetchedForPlatform.map((j) => j.job_url));
@@ -661,9 +603,8 @@ export async function getOrFetchJobs(
     }
   }
 
-  // 4. Cache expired or forceRefresh -> Call Brave API for all 4 platforms
-  const braveApiKey = process.env.BRAVE_SEARCH_API_KEY || process.env.BRAVE_API_KEY || "BSAQgZheRaOHWI8XRgM5Y40YSNZvIOj";
-
+  // 4. Cache expired or forceRefresh -> Call Tavily for all 4 platforms
+  const tavilyApiKey = process.env.TAVILY_API_KEY;
   const allFetched: Omit<JobItem, "id" | "created_at">[] = [];
   const platforms: ("greenhouse" | "lever" | "workable" | "wellfound")[] = [
     "greenhouse",
@@ -675,12 +616,12 @@ export async function getOrFetchJobs(
   for (const plat of platforms) {
     let platResults: Omit<JobItem, "id" | "created_at">[] = [];
     try {
-      const braveResults = await searchBravePlatform(plat, userProfile, braveApiKey);
-      if (braveResults.length > 0) {
-        platResults = normalizeBraveResults(braveResults, plat, userId, userProfile);
+      const tavilyResults = await searchTavilyPlatform(plat, userProfile, tavilyApiKey);
+      if (tavilyResults.length > 0) {
+        platResults = normalizeTavilyResults(tavilyResults, plat, userId, userProfile);
       }
     } catch (err) {
-      console.warn(`Brave API fetch error for ${plat}:`, err);
+      console.warn(`Tavily search error for ${plat}:`, err);
     }
 
     if (platResults.length < 3) {

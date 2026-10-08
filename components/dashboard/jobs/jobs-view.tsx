@@ -216,7 +216,7 @@ export function JobsView({
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-semibold mb-3">
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>AI Job Search Engine • Brave Search API</span>
+              <span>AI Job Search Engine • Tavily Search API</span>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
@@ -261,7 +261,7 @@ export function JobsView({
               className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 shadow-lg shadow-indigo-600/25 active:scale-[0.98] transition-all cursor-pointer"
             >
               <RotateCw className={cn("w-4 h-4", refreshing && "animate-spin")} />
-              <span>{refreshing ? "Searching Brave API..." : "Refresh Matches"}</span>
+              <span>{refreshing ? "Searching Tavily API..." : "Refresh Matches"}</span>
             </button>
 
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getOrFetchJobs } from "@/lib/jobs/brave-search";
+import { getOrFetchJobs } from "@/lib/jobs/tavily-search";
 import { JobsView } from "@/components/dashboard/jobs/jobs-view";
 import { ProfileData } from "@/components/dashboard/profile-form";
 
