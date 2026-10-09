@@ -7,7 +7,12 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
-  serverExternalPackages: ["pdf-parse", "pdfjs-dist"],
+  serverExternalPackages: [
+    "pdf-parse",
+    "pdfjs-dist",
+    "@browserbasehq/stagehand",
+    "@browserbasehq/sdk",
+  ],
   turbopack: {
     rules: {
       "*.css": {

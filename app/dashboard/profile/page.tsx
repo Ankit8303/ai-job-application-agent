@@ -48,6 +48,14 @@ export default async function ProfilePage() {
     onboarded: profile?.onboarded ?? false,
   };
 
+  // Fetch any pending applications with status 'Missing Profile Info'
+  const { data: pendingApplications } = await supabase
+    .from("job_applications")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("status", "Missing Profile Info")
+    .order("updated_at", { ascending: false });
+
   return (
     <div className="flex-1 flex flex-col space-y-6">
       <div>
@@ -59,7 +67,10 @@ export default async function ProfilePage() {
         </p>
       </div>
 
-      <ProfileForm initialProfile={initialProfile} />
+      <ProfileForm
+        initialProfile={initialProfile}
+        pendingApplications={pendingApplications || []}
+      />
     </div>
   );
 }

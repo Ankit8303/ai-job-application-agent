@@ -1,11 +1,11 @@
 "use client";
 
-import { PLATFORMS, JobPlatform } from "@/lib/jobs/types";
-import { Check, Globe, Sparkles } from "lucide-react";
+import { resolvePlatformConfig, JobPlatform } from "@/lib/jobs/types";
+import { Check, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PlatformCardProps {
-  platformKey: "greenhouse" | "lever" | "workable" | "wellfound";
+  platformKey: string;
   isSelected: boolean;
   count?: number;
   onSelect: (platform: JobPlatform) => void;
@@ -17,14 +17,14 @@ export function PlatformCard({
   count,
   onSelect,
 }: PlatformCardProps) {
-  const config = PLATFORMS[platformKey];
+  const config = resolvePlatformConfig(platformKey);
 
   return (
     <button
       type="button"
       onClick={() => onSelect(isSelected ? "all" : platformKey)}
       className={cn(
-        "relative flex flex-col p-4 rounded-2xl border text-left transition-all duration-200 group w-full overflow-hidden",
+        "relative flex flex-col p-4 rounded-2xl border text-left transition-all duration-200 group w-full overflow-hidden cursor-pointer",
         isSelected
           ? "bg-slate-900/90 border-indigo-500/80 shadow-lg shadow-indigo-500/10 ring-1 ring-indigo-500/50"
           : "bg-slate-900/40 border-slate-800/80 hover:bg-slate-900/70 hover:border-slate-700/80"

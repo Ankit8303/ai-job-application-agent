@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   User,
@@ -20,8 +21,12 @@ import {
   Sparkles,
   UploadCloud,
   FileText,
+  AlertTriangle,
+  ArrowRight,
+  Bot,
 } from "lucide-react";
 import { ProfileCompletenessCard } from "./profile-completeness-card";
+import { FillMissingFieldsDialog } from "./jobs/fill-missing-fields-dialog";
 
 export interface ExperienceItem {
   company_name: string;
@@ -76,6 +81,14 @@ export interface ProfileData {
 
 interface ProfileFormProps {
   initialProfile: ProfileData;
+  pendingApplications?: Array<{
+    id: string;
+    company_name: string;
+    position: string;
+    platform?: string;
+    missing_fields?: string[];
+    status?: string;
+  }>;
 }
 
 type TabType =
@@ -87,7 +100,12 @@ type TabType =
   | "certifications"
   | "links";
 
-export function ProfileForm({ initialProfile }: ProfileFormProps) {
+export function ProfileForm({ initialProfile, pendingApplications = [] }: ProfileFormProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryAppId = searchParams.get("applicationId");
+  const queryMissing = searchParams.get("missing")?.split(",").filter(Boolean);
+
   const supabase = createClient();
   const resumeFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,6 +115,12 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Automation continuation state
+  const [continuingAppId, setContinuingAppId] = useState<string | null>(null);
+  const [continueError, setContinueError] = useState<string | null>(null);
+  const [continueSuccess, setContinueSuccess] = useState<string | null>(null);
+  const [dialogApp, setDialogApp] = useState<{ id: string; title: string; company: string; missing: string[] } | null>(null);
 
   // Resume auto-fill state
   const [isAutoFilling, setIsAutoFilling] = useState(false);
@@ -388,6 +412,90 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     }
   };
 
+  // Quick tab switch for missing fields
+  const jumpToFieldTab = (fieldStr: string) => {
+    const f = fieldStr.toLowerCase();
+    if (
+      f.includes("link") ||
+      f.includes("linkedin") ||
+      f.includes("github") ||
+      f.includes("portfolio") ||
+      f.includes("website")
+    ) {
+      setActiveTab("links");
+    } else if (
+      f.includes("experience") ||
+      f.includes("company") ||
+      f.includes("employer") ||
+      f.includes("job")
+    ) {
+      setActiveTab("experience");
+    } else if (f.includes("skill")) {
+      setActiveTab("skills");
+    } else if (f.includes("education") || f.includes("degree")) {
+      setActiveTab("education");
+    } else {
+      setActiveTab("personal");
+    }
+  };
+
+  // Continue automation after candidate fills missing profile fields
+  const handleSaveAndContinueAutomation = async (appId: string) => {
+    setContinuingAppId(appId);
+    setContinueError(null);
+    setContinueSuccess(null);
+
+    try {
+      // Step 1: Save current profile
+      const updateData = {
+        id: profile.id,
+        email: profile.email,
+        full_name: profile.full_name,
+        phone: profile.phone,
+        location: profile.location,
+        headline: profile.headline,
+        summary: profile.summary,
+        skills: profile.skills,
+        experience: profile.experience,
+        education: profile.education,
+        projects: profile.projects,
+        certifications: profile.certifications,
+        links: profile.links,
+        onboarded: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: saveErr } = await supabase.from("profiles").upsert(updateData);
+      if (saveErr) throw new Error("Failed to save profile: " + saveErr.message);
+
+      // Step 2: Call continue endpoint
+      const res = await fetch("/api/jobs/apply/continue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: appId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to continue automation");
+      }
+
+      if (!data.isComplete && data.missingFields?.length > 0) {
+        setContinueError(`Still missing: ${data.missingFields.join(", ")}. Please complete these fields.`);
+      } else {
+        setContinueSuccess("Profile verified! AI agent submitted your application successfully. Redirecting to Application Tracker...");
+        setTimeout(() => {
+          router.push("/dashboard/application-status");
+        }, 2000);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setContinueError(err?.message || "Error continuing application");
+    } finally {
+      setContinuingAppId(null);
+    }
+  };
+
   // Tabs metadata with proper icons and badges
   const tabs = [
     {
@@ -438,6 +546,142 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
       {/* LEFT / MAIN COLUMN: Tabs & Form Content */}
       <div className="lg:col-span-8 space-y-6">
+        {/* Missing Profile Information for Automated Applications Banner */}
+        {((pendingApplications && pendingApplications.length > 0) || queryAppId) && (
+          <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-amber-950/50 via-[#101420] to-amber-950/30 border-2 border-amber-500/50 shadow-2xl shadow-amber-500/10 space-y-4 animate-in fade-in duration-300">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                      Missing Profile Information for AI Application
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">
+                      Action Required
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1">
+                    The Browserbase agent detected required fields on the employer application form that are not yet filled in your profile. Complete them below to resume automated submission.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* List of Applications with Missing Info */}
+            <div className="space-y-3 pt-1">
+              {(pendingApplications.length > 0
+                ? pendingApplications
+                : queryAppId
+                ? [
+                    {
+                      id: queryAppId,
+                      company_name: "Selected Role",
+                      position: "Pending Application",
+                      missing_fields: queryMissing || ["Phone", "Resume"],
+                    },
+                  ]
+                : []
+              ).map((app) => {
+                const missingList = Array.isArray(app.missing_fields) && app.missing_fields.length > 0
+                  ? app.missing_fields
+                  : queryMissing || ["Phone Number", "LinkedIn URL"];
+
+                const isCurrentAppContinuing = continuingAppId === app.id;
+
+                return (
+                  <div
+                    key={app.id}
+                    className="p-4 rounded-2xl bg-slate-900/90 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{app.position}</span>
+                        <span className="text-xs text-slate-400">• {app.company_name}</span>
+                        {app.platform && (
+                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                            {app.platform}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
+                        <span className="text-xs text-amber-400 font-semibold mr-1">Missing:</span>
+                        {missingList.map((field, fIdx) => (
+                          <button
+                            key={fIdx}
+                            type="button"
+                            onClick={() => jumpToFieldTab(field)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold cursor-pointer transition-colors"
+                            title={`Click to switch to ${field} field`}
+                          >
+                            <span>★ {field}</span>
+                            <span className="text-[10px] text-amber-400/80 underline ml-0.5">Edit →</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDialogApp({
+                            id: app.id,
+                            title: app.position,
+                            company: app.company_name,
+                            missing: missingList,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-slate-700 transition-colors cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Fill in Dialog</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSaveAndContinueAutomation(app.id)}
+                        disabled={isCurrentAppContinuing}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all cursor-pointer"
+                      >
+                        {isCurrentAppContinuing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                            <span>Verifying & Submitting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>Save & Continue</span>
+                            <ArrowRight className="w-4 h-4 text-slate-950" />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Error or Success banners for continue action */}
+            {continueError && (
+              <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{continueError}</span>
+              </div>
+            )}
+
+            {continueSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{continueSuccess}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Quick Resume Auto-Fill Action Banner */}
         <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-[#0E1322] via-[#090D16] to-[#0E1322] border border-indigo-500/20 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
@@ -1260,6 +1504,22 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
           saveSuccess={saveSuccess}
         />
       </div>
+
+      {/* Fill Missing Fields Dialog Modal */}
+      {dialogApp && (
+        <FillMissingFieldsDialog
+          isOpen={Boolean(dialogApp)}
+          onClose={() => setDialogApp(null)}
+          applicationId={dialogApp.id}
+          jobTitle={dialogApp.title}
+          companyName={dialogApp.company}
+          missingFields={dialogApp.missing}
+          onSuccess={() => {
+            setDialogApp(null);
+            router.push("/dashboard/application-status");
+          }}
+        />
+      )}
     </div>
   );
 }

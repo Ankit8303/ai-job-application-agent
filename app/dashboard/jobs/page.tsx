@@ -48,7 +48,7 @@ export default async function JobsPage() {
     onboarded: profile?.onboarded ?? false,
   };
 
-  // Fetch jobs using 6-hour caching logic
+  // Fetch latest jobs using real-time discovery and freshness pipeline
   const result = await getOrFetchJobs(supabase, user.id, false, "all");
 
   return (

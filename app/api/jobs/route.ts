@@ -38,13 +38,27 @@ export async function GET(request: Request) {
       });
     }
 
-    const result = await getOrFetchJobs(supabase, user.id, forceRefresh, platform);
+    const seed = parseInt(searchParams.get("seed") || "0", 10);
+    const excludeUrlsParam = searchParams.get("excludeUrls") || "";
+    const clientExcludeUrls = excludeUrlsParam
+      ? excludeUrlsParam.split(",").map((u) => decodeURIComponent(u.trim())).filter(Boolean)
+      : [];
+
+    const result = await getOrFetchJobs(
+      supabase,
+      user.id,
+      forceRefresh,
+      platform,
+      isNaN(seed) ? 0 : seed,
+      clientExcludeUrls
+    );
 
     return NextResponse.json({
       success: true,
       jobs: result.jobs,
       fromCache: result.fromCache,
       lastFetchedAt: result.lastFetchedAt,
+      newJobsCount: result.newJobsCount ?? 0,
     });
   } catch (err: unknown) {
     console.error("Jobs API error:", err);
@@ -82,7 +96,7 @@ export async function PATCH(request: Request) {
       .eq("id", jobId)
       .eq("user_id", user.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
